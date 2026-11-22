@@ -1,0 +1,28 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Feed tests
+        run: node --test poller/analysis.test.mjs poller/history.test.mjs
+      - name: Lua syntax (addon)
+        run: |
+          npm install --silent --no-save luaparse@0.3.1
+          node -e '
+            const fs = require("fs"), path = require("path"), luaparse = require("luaparse");
+            const toc = fs.readFileSync("addon/LootLedger/LootLedger.toc", "utf8").split(/\r?\n/).filter((l) => l.endsWith(".lua"));
+            for (const f of toc) {
+              const file = path.join("addon/LootLedger", ...f.split("\\"));
+              luaparse.parse(fs.readFileSync(file, "utf8"), { luaVersion: "5.1" });
+              console.log("ok", file);
+            }'

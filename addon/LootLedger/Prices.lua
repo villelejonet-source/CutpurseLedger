@@ -1,0 +1,276 @@
+-- Loot Ledger: prices
+-- One place to ask "what is this item worth?".
+--
+-- Sources, best first:
+--   1. LootLedger_Prices: hourly snapshot of your auction house from Blizzard's
+--      API (published by the GitHub Action, copied in by scripts/sync.ps1).
+--   2. TSM's AuctionDB via TSM_API, if TSM and its desktop app data are present.
+--   3. Vendor price only.
+
+local ADDON, ns = ...
+local P = {}
+ns.Prices = P
+
+local CACHE_SECONDS = 300
+local cache = {}
+
+---------------------------------------------------------------------------
+-- 1. Blizzard snapshot (LootLedger_Prices)
+---------------------------------------------------------------------------
+local function Feed() return type(LootLedgerPrices) == "table" and LootLedgerPrices or nil end
+
+-- House IDs in the feed, biggest first.
+function P.Houses()
+  local feed, list = Feed(), {}
+  if not feed then return list end
+  for id, h in pairs(feed.houses or {}) do list[#list + 1] = { id = id, listings = h.listings or 0 } end
+  table.sort(list, function(a, b) return a.listings > b.listings end)
+  return list
+end
+
+-- The house this character reads prices from. Stored per character, because
+-- alts on the other faction (or at a neutral AH) use a different house.
+-- Returns id, confirmed (bool), source ("detected" | "manual" | "guess")
+function P.House()
+  local feed = Feed()
+  if not feed then return nil end
+  local db = ns.db
+  local chosen = db and db.house
+  if chosen and feed.houses[chosen] then return chosen, true, db.houseSource or "manual" end
+  -- Not known yet: guess the biggest house of the player's faction.
+  local faction = UnitFactionGroup and UnitFactionGroup("player")
+  local guess
+  for _, h in ipairs(P.Houses()) do
+    if feed.houses[h.id].faction == faction then guess = h.id; break end
+  end
+  guess = guess or (P.Houses()[1] and P.Houses()[1].id)
+  return guess, false, "guess"
+end
+
+-- source: "manual" (/ll house) or "detected" (matched at the AH)
+function P.SetHouse(id, source)
+  ns.db.house = id
+  ns.db.houseSource = source or "manual"
+  P.ClearCache()
+end
+
+ns.OnInit(function()
+  -- Before 3.9 the house was one setting for the whole account.
+  if ns.ui.house and not ns.db.house then
+    ns.db.house, ns.db.houseSource = ns.ui.house, "manual"
+  end
+end)
+
+local function FromFeed(itemID, c)
+  local feed = Feed()
+  local houseID = P.House()
+  local house = houseID and feed.houses[houseID]
+  local s = house and house.items and house.items[itemID]
+  if not s then return false end
+  local market, min, qty, a7, a30 = s:match("^(%d+),(%d+),(%d+),(%d+),(%d+)$")
+  c.market, c.recent = tonumber(market), tonumber(market)
+  c.min, c.auctions = tonumber(min), tonumber(qty)
+  c.avg7 = tonumber(a7) > 0 and tonumber(a7) or nil
+  c.historical = tonumber(a30) > 0 and tonumber(a30) or nil
+  return true
+end
+
+-- Where prices come from right now, for display.
+-- Returns { source = "blizzard"|"tsm"|"none", house, confirmed, updated, days }
+function P.Status()
+  local feed = Feed()
+  if feed then
+    local id, confirmed, how = P.House()
+    local h = id and feed.houses[id]
+    return { source = "blizzard", house = id, confirmed = confirmed, how = how,
+      houseName = h and h.name,
+      updated = h and h.updated or feed.updated, days = h and type(h.days) == "number" and h.days or 0 }
+  end
+  if P.HasTSM() then return { source = "tsm" } end
+  return { source = "none" }
+end
+
+-- One line for the UI, e.g. "Blizzard AH, house 113 · updated 20 min ago · 3 days of history".
+function P.StatusText()
+  local s = P.Status()
+  if s.source == "none" then
+    return "No AH prices loaded. Install or update LootLedger_Prices, then restart WoW."
+  elseif s.source == "tsm" then
+    return "AH prices from TSM."
+  end
+  local mins = math.floor((time() - (s.updated or 0)) / 60)
+  local age = mins < 90 and (mins .. " min ago") or (mins < 2880 and (math.floor(mins / 60) .. " h ago") or (math.floor(mins / 1440) .. " days ago"))
+  local which = ({ detected = " (detected at the AH)", manual = " (set by you)",
+    guess = " (a guess: open the AH once to detect yours)" })[s.how] or ""
+  local text = "AH prices: " .. (s.houseName or "house") .. " " .. s.house .. which
+    .. "  ·  updated " .. age .. "  ·  " .. s.days .. (s.days == 1 and " day" or " days") .. " of history"
+  if mins > 360 then text = text .. "  ·  update LootLedger_Prices for fresh prices" end
+  return text
+end
+
+---------------------------------------------------------------------------
+-- Per-item history (from the feed's hist table)
+---------------------------------------------------------------------------
+local histCache = {}
+
+local function List(s, base)
+  local out, n = {}, 0
+  for v in (s .. ","):gmatch("([^,]*),") do
+    n = n + 1
+    out[n] = v ~= "" and tonumber(v, base) or false  -- false = no data that day
+  end
+  return out, n
+end
+
+-- History for one item, or nil if the feed has none.
+-- {
+--   daily   = { values, labels }  last 30 days, oldest first (false = no listings)
+--   weekly  = { values, labels }  last 12 weeks (label = Monday "YYYY-MM-DD")
+--   monthly = { values, labels }  last 12 months ("YYYY-MM")
+--   weekday = { [1..7] = fraction vs the week's average (Mon..Sun) or false },
+--   weeks, consistency (0..1), reliable (bool)  -- how much to trust the weekday pattern
+--   trend      = fraction per day (-0.02 = falling 2%/day) or nil
+--   baseline   = recent "normal" price (copper) or nil
+--   volatility = typical day-to-day move (fraction) or nil
+--   usualQty   = usual quantity listed or nil
+-- }
+function P.History(itemID)
+  local feed = Feed()
+  local houseID = P.House()
+  local house = houseID and feed and feed.houses[houseID]
+  local s = house and house.hist and house.hist[itemID]
+  if not s then return nil end
+  local cached = histCache[itemID]
+  if cached and cached.src == s then return cached end
+
+  local f = {}
+  for k, v in s:gmatch("(%a)=([^;]*)") do f[k] = v end
+  local h = { src = s }
+  h.daily = { values = List(f.d or "", 36), labels = house.dayLabels or {} }
+  h.weekly = { values = List(f.w or "", 36), labels = house.weekLabels or {} }
+  h.monthly = { values = List(f.m or "", 36), labels = house.monthLabels or {} }
+
+  local p = List(f.p or "", 10)
+  h.weekday = {}
+  for i = 1, 7 do h.weekday[i] = p[i] and p[i] / 1000 or false end
+  h.weeks = p[8] or 0
+  h.consistency = (p[9] or 0) / 100
+  h.reliable = p[10] == 1
+
+  local t = {}
+  for v in ((f.t or "") .. ","):gmatch("([^,]*),") do t[#t + 1] = v end
+  h.trend = tonumber(t[1] or "", 10) and tonumber(t[1], 10) / 1000 or nil
+  h.baseline = tonumber(t[2] or "", 36)
+  h.volatility = tonumber(t[3] or "", 10) and tonumber(t[3], 10) / 1000 or nil
+  h.usualQty = tonumber(t[4] or "", 36)
+
+  -- Days with any data, for "how much history is there"
+  local seen = 0
+  for _, v in ipairs(h.daily.values) do if v then seen = seen + 1 end end
+  h.daysSeen = seen
+  histCache[itemID] = h
+  return h
+end
+
+local DAY_NAMES = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" }
+local DAY_SHORT = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" }
+P.DAY_NAMES, P.DAY_SHORT = DAY_NAMES, DAY_SHORT
+
+-- Best and worst weekdays from a history, grouping days that are close to the
+-- best/worst (within 2 points). Returns nil unless the pattern is reliable.
+-- { best = {idx...}, worst = {idx...}, bestPct, worstPct, spread }
+function P.WeekdayAdvice(h)
+  if not (h and h.reliable) then return nil end
+  local hi, lo
+  for i = 1, 7 do
+    local v = h.weekday[i]
+    if v then
+      if not hi or v > h.weekday[hi] then hi = i end
+      if not lo or v < h.weekday[lo] then lo = i end
+    end
+  end
+  if not (hi and lo) then return nil end
+  local best, worst = {}, {}
+  for i = 1, 7 do
+    local v = h.weekday[i]
+    if v and h.weekday[hi] - v <= 0.02 then best[#best + 1] = i end
+    if v and v - h.weekday[lo] <= 0.02 then worst[#worst + 1] = i end
+  end
+  return {
+    best = best, worst = worst, bestPct = h.weekday[hi], worstPct = h.weekday[lo],
+    spread = (1 + h.weekday[hi]) / (1 + h.weekday[lo]) - 1,
+  }
+end
+
+-- "Fri/Sat", "Tuesday"
+function P.DayList(idxs, long)
+  local names = {}
+  for _, i in ipairs(idxs) do names[#names + 1] = (long and #idxs == 1) and DAY_NAMES[i] or DAY_SHORT[i] end
+  return table.concat(names, "/")
+end
+
+---------------------------------------------------------------------------
+-- 2. TSM
+---------------------------------------------------------------------------
+local TSM_SOURCES = {
+  market = "DBMarket", min = "DBMinBuyout", recent = "DBRecent", historical = "DBHistorical",
+  auctions = "DBNumAuctions", region = "DBRegionMarketAvg", saleAvg = "DBRegionSaleAvg",
+  saleRate = "DBRegionSaleRate", soldPerDay = "DBRegionSoldPerDay",
+}
+
+local function TSMValue(source, itemString)
+  if not (TSM_API and TSM_API.GetCustomPriceValue) then return nil end
+  local ok, value = pcall(TSM_API.GetCustomPriceValue, source, itemString)
+  if ok and type(value) == "number" then return value end
+  return nil
+end
+
+function P.HasTSM()
+  return TSM_API ~= nil and TSM_API.GetCustomPriceValue ~= nil
+end
+
+local function FromTSM(itemID, c)
+  local itemString = "i:" .. itemID
+  for field, source in pairs(TSM_SOURCES) do c[field] = TSMValue(source, itemString) end
+  return (c.market or c.region) ~= nil
+end
+
+---------------------------------------------------------------------------
+-- Lookup
+---------------------------------------------------------------------------
+-- Everything known about an item's price. Fields can be nil.
+-- { vendor, market, min, recent, historical, avg7, auctions, soldPerDay,
+--   saleRate, region, hasAH = bool, source = "blizzard"|"tsm"|nil }
+function P.Get(itemID)
+  if not itemID then return { vendor = 0, hasAH = false } end
+  local c = cache[itemID]
+  if c and GetTime() - c.at < CACHE_SECONDS then return c end
+
+  c = { at = GetTime(), vendor = ns.SellPrice(itemID) }
+  if FromFeed(itemID, c) then
+    c.source = "blizzard"
+  elseif FromTSM(itemID, c) then
+    c.source = "tsm"
+  end
+  local feed = Feed()
+  if feed and feed.spd and feed.spd[itemID] then c.soldPerDay = c.soldPerDay or feed.spd[itemID] end
+  c.hasAH = (c.market or c.region) ~= nil
+  cache[itemID] = c
+  return c
+end
+
+-- The AH price we treat as "what it sells for now".
+function P.AHPrice(p)
+  return p.recent or p.market or p.region
+end
+
+-- The AH price we treat as "normal" for this item: the recent baseline (last
+-- few days, weighted to the newest) when there is history. In a young economy
+-- a 30-day average is mostly old news.
+function P.NormalPrice(p, itemID)
+  local h = itemID and P.History(itemID)
+  if h and h.baseline then return h.baseline end
+  return p.avg7 or p.historical or p.region or p.market
+end
+
+function P.ClearCache() cache = {}; histCache = {} end

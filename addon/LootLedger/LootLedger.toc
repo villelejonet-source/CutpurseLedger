@@ -1,0 +1,27 @@
+## Interface: 16001
+## Title: Loot Ledger
+## Notes: Gold ledger, pickpocket and gathering tracker, and auction house advisor for WoW: Forever. Prices come from LootLedger_Prices.
+## Author: Loot Ledger
+## Version: 3.9.0
+## SavedVariables: LootLedgerAccountDB
+## SavedVariablesPerCharacter: LootLedgerDB
+## OptionalDeps: LootLedger_Prices, TradeSkillMaster, PickpocketTracker
+
+Core.lua
+Gathering.lua
+Ledger.lua
+Prices.lua
+Inventory.lua
+Advisor.lua
+VendorGuard.lua
+HouseDetect.lua
+Tooltip.lua
+UI\Theme.lua
+UI\Box.lua
+UI\Window.lua
+UI\TabOverview.lua
+UI\TabLog.lua
+UI\TabInventory.lua
+UI\TabGathering.lua
+UI\TabMarket.lua
+Slash.lua

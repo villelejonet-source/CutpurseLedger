@@ -1,0 +1,86 @@
+-- Loot Ledger: item tooltips get the advice, the AH prices behind it, and how
+-- many you own.
+
+local ADDON, ns = ...
+local Grey = function(s) return "|cff999999" .. s .. "|r" end
+
+local function Row(tooltip, label, value)
+  tooltip:AddDoubleLine("  " .. label, value, 0.75, 0.75, 0.75, 1, 1, 1)
+end
+
+local function AddLines(tooltip, id, needsShow)
+  if not (ns.db and id) then return end
+  local d = ns.Advisor.Decide(id)
+  tooltip:AddDoubleLine("Loot Ledger: " .. ns.Advisor.Tag(d.action), d.reason, 1, 0.82, 0, 1, 1, 1)
+
+  -- Prices
+  local p = ns.Prices.Get(id)
+  if p.hasAH then
+    local ah = ns.Prices.AHPrice(p)
+    Row(tooltip, "AH price", ns.Money(ah) .. Grey(" each"))
+    if p.min and p.min < ah then
+      Row(tooltip, "Lowest listed", ns.Money(p.min) .. (p.auctions and Grey("  (" .. p.auctions .. " listed)") or ""))
+    elseif p.auctions then
+      Row(tooltip, "Listed", tostring(p.auctions))
+    end
+    local h = ns.Prices.History(id)
+    local status = ns.Prices.Status()
+    if h and h.baseline then
+      local vs = d.vs and string.format("  (%+d%%)", math.floor(d.vs * 100 + 0.5)) or ""
+      Row(tooltip, "Normal price", ns.Money(h.baseline) .. Grey(vs .. "  last few days"))
+    elseif status.source == "blizzard" then
+      Row(tooltip, "Normal price", Grey("building history (" .. (status.days or 0) .. (status.days == 1 and " day)" or " days)")))
+    end
+    if h and h.trend then
+      local up = h.trend >= 0
+      Row(tooltip, "Trend", (up and "|cff5cdc75" or "|cffff6b6b") .. string.format("%+.1f%%", h.trend * 100) .. "|r" .. Grey(" per day"))
+    end
+    local wk = ns.Prices.WeekdayAdvice(h)
+    if wk then
+      Row(tooltip, "Best day to sell", ns.Prices.DayList(wk.best) .. Grey(string.format("  (%+d%%)", math.floor(wk.bestPct * 100 + 0.5))))
+    end
+    if p.soldPerDay then Row(tooltip, "Sells per day (EU)", tostring(p.soldPerDay)) end
+  end
+
+  -- What you own, and what it would bring in
+  local total, parts = 0, {}
+  for _, ch in ipairs(ns.Inventory.RealmChars()) do
+    local n = ns.Inventory.Count(ch, id)
+    if n > 0 then
+      total = total + n
+      parts[#parts + 1] = ch.name .. " " .. n
+    end
+  end
+  if total > 0 then
+    if p.hasAH and ns.Advisor.IsAHItem(id) then
+      local net = math.floor(ns.Prices.AHPrice(p) * (1 - ns.Advisor.SETTINGS.ahCut)) * total
+      local vendor = (p.vendor or 0) * total
+      Row(tooltip, "Your " .. total .. " on the AH", ns.Money(net)
+        .. (vendor > 0 and Grey("  (vendor ") .. ns.Money(vendor) .. Grey(")") or ""))
+    end
+    tooltip:AddLine("  You own " .. total .. "  (" .. table.concat(parts, ", ") .. ")", 0.6, 0.6, 0.6)
+  end
+  if p.hasAH then tooltip:AddLine("  Alt+click: price history", 0.45, 0.45, 0.45) end
+  if needsShow then tooltip:Show() end  -- older clients need a resize
+end
+
+local function IdFromLink(link)
+  return link and tonumber(link:match("item:(%d+)"))
+end
+
+if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
+  TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
+    if tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip then return end
+    local id = data and data.id
+    if not id and tooltip.GetItem then id = IdFromLink(select(2, tooltip:GetItem())) end
+    AddLines(tooltip, id)
+  end)
+else
+  for _, tt in ipairs({ GameTooltip, ItemRefTooltip }) do
+    if tt and tt.HookScript then
+      tt:HookScript("OnTooltipSetItem", function(self)
+        AddLines(self, IdFromLink(select(2, self:GetItem())), true)
+      end)
+    end
+  end
+end

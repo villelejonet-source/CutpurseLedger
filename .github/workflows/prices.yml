@@ -1,0 +1,79 @@
+name: Prices
+
+# Every hour: read the WoW: Forever auction houses from Blizzard's API, update the
+# price history, and publish a GitHub Release with Loot Ledger + fresh prices.
+# Blizzard refreshes the houses around :23, so this runs at :40.
+on:
+  schedule:
+    - cron: "40 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prices
+  cancel-in-progress: false
+
+jobs:
+  prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+      GH_TOKEN: ${{ github.token }}
+      KEEP_RELEASES: 48
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Tests
+        run: node --test poller/analysis.test.mjs poller/history.test.mjs
+
+      - name: Get previous history
+        run: git clone --quiet --depth 1 --branch history "$REPO_URL" history || mkdir -p history
+
+      - name: Fetch auction houses
+        run: node poller/ah.mjs
+        env:
+          BNET_CLIENT_ID: ${{ secrets.BNET_CLIENT_ID }}
+          BNET_CLIENT_SECRET: ${{ secrets.BNET_CLIENT_SECRET }}
+          BNET_REGION: ${{ vars.BNET_REGION || 'eu' }}
+          AH_RULESET: ${{ vars.AH_RULESET || '2' }}
+          AH_HOUSES: ${{ vars.AH_HOUSES || 'all' }}
+
+      - name: Build zip
+        id: build
+        run: |
+          version=$(sed -n 's/^## Version: *//p' addon/LootLedger/LootLedger.toc | tr -d '\r')
+          stamp=$(date -u +%Y%m%d%H%M)
+          mkdir -p dist/pkg
+          cp -r addon/LootLedger out/LootLedger_Prices dist/pkg/
+          (cd dist/pkg && zip -qr "../LootLedger-$version-$stamp.zip" LootLedger LootLedger_Prices)
+          echo "tag=v$version-$stamp" >> "$GITHUB_OUTPUT"
+          echo "title=Loot Ledger $version · prices $(date -u '+%Y-%m-%d %H:%M') UTC" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        run: |
+          gh release create "${{ steps.build.outputs.tag }}" dist/*.zip \
+            --title "${{ steps.build.outputs.title }}" \
+            --notes "Loot Ledger with auction house prices from $(date -u '+%Y-%m-%d %H:%M') UTC. Install or update both folders (LootLedger and LootLedger_Prices) into Interface/AddOns of your _forever_ folder." \
+            --latest
+
+      # History lives on its own branch, replaced every run (one commit, so the repo doesn't grow).
+      - name: Keep history
+        run: |
+          cd out/history
+          git init --quiet --initial-branch history
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898299+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "history $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push --quiet --force "$REPO_URL" history
+
+      - name: Prune old releases
+        run: |
+          gh release list --limit 300 --json tagName,createdAt \
+            --jq "sort_by(.createdAt) | reverse | .[${KEEP_RELEASES}:] | .[].tagName" |
+          while read -r tag; do gh release delete "$tag" --yes --cleanup-tag; done

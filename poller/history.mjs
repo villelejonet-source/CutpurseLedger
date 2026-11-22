@@ -1,0 +1,118 @@
+// History storage and what the game reads from it.
+//
+// Stored per auction house (history/<house>.json.gz):
+//   days:   { "YYYY-MM-DD": { [itemId]: [sum of hourly market, hours, lowest min, sum of hourly qty] } }
+//           kept for KEEP_DAYS; older days are folded into...
+//   months: { "YYYY-MM": { [itemId]: [sum of daily market, days] } }
+//           kept forever (small: one entry per item per month)
+//
+// For the game: per-item series, a compact per-item history string (hist) and
+// the labels for its series.
+import { analyze, baseline, weekKey, monthKey, dayKey } from "./analysis.mjs";
+
+export const HIST_OUT_DAYS = 30; // daily points sent to the game per item
+export const KEEP_DAYS = 120;    // daily detail kept; older days live on as monthly averages
+
+// Add one hourly snapshot ({ [id]: { market, min, qty } }) to today's entry.
+export function addSnapshot(history, items, now) {
+  const today = dayKey(now);
+  const day = (history.days[today] ??= {});
+  for (const [id, s] of Object.entries(items)) {
+    const e = (day[id] ??= [0, 0, s.min, 0]);
+    e[0] += s.market;
+    e[1] += 1;
+    e[2] = Math.min(e[2], s.min);
+    e[3] = (e[3] ?? 0) + s.qty;
+  }
+}
+
+// Fold days older than KEEP_DAYS into monthly averages, then drop them.
+export function archiveOldDays(history, now, keepDays = KEEP_DAYS) {
+  history.months ??= {};
+  const oldest = dayKey(now - keepDays * 86400e3);
+  for (const key of Object.keys(history.days)) {
+    if (key >= oldest) continue;
+    const month = (history.months[monthKey(key)] ??= {});
+    for (const [id, e] of Object.entries(history.days[key])) {
+      if (!(e[1] > 0)) continue;
+      const m = (month[id] ??= [0, 0]);
+      m[0] += e[0] / e[1];
+      m[1] += 1;
+    }
+    delete history.days[key];
+  }
+}
+
+// The last 12 months that have any data (archived or in the daily window), oldest first.
+export function monthKeys(history, days) {
+  return [...new Set([...Object.keys(history.months ?? {}), ...days.map(monthKey)])].sort().slice(-12);
+}
+
+// One item's monthly averages for the given months, combining archive and daily window.
+export function monthlyFor(history, days, id, keys) {
+  const acc = {};
+  for (const [m, items] of Object.entries(history.months ?? {})) {
+    const e = items[id];
+    if (e) acc[m] = [e[0], e[1]];
+  }
+  for (const key of days) {
+    const e = history.days[key]?.[id];
+    if (e && e[1] > 0) {
+      const a = (acc[monthKey(key)] ??= [0, 0]);
+      a[0] += e[0] / e[1];
+      a[1] += 1;
+    }
+  }
+  return keys.map((m) => (acc[m] && acc[m][1] ? acc[m][0] / acc[m][1] : null));
+}
+
+// Every day from the first day in history to today, oldest first.
+export function allDays(history, now) {
+  const keys = Object.keys(history.days).sort();
+  const out = [];
+  if (!keys.length) return out;
+  for (let t = Date.parse(keys[0] + "T12:00:00Z"); dayKey(t) <= dayKey(now); t += 86400e3) out.push(dayKey(t));
+  return out;
+}
+
+// One item's daily series: [{ key, market, qty }] with nulls on days without listings.
+export function seriesFor(history, days, id) {
+  return days.map((key) => {
+    const e = history.days[key]?.[id];
+    const ok = e && e[1] > 0;
+    return { key, market: ok ? e[0] / e[1] : null, qty: ok && e[3] != null ? e[3] / e[1] : null };
+  });
+}
+
+// Average of the last n days with data (including today), 0 if none.
+export function average(series, n) {
+  const v = series.slice(-n).map((d) => d.market).filter((x) => x != null);
+  return v.length ? Math.round(v.reduce((s, x) => s + x, 0) / v.length) : 0;
+}
+
+export const b36 = (v) => (v == null || !Number.isFinite(v) ? "" : Math.round(v).toString(36));
+export const int = (v) => (v == null || !Number.isFinite(v) ? "" : String(Math.round(v)));
+
+// Compact per-item history for the game (numbers in base 36 to keep the file small):
+//   d=<last 30 daily markets>;w=<12 weekly>;m=<12 monthly>
+//   p=<Mon..Sun deviation in permille>,<weeks>,<consistency %>,<reliable 0/1>
+//   t=<trend permille/day>,<baseline>,<volatility permille>,<usual quantity listed>
+export function encodeHistory(series, monthly) {
+  const a = analyze(series);
+  const p = a.profile;
+  const qtyUsual = baseline(series.slice(0, -1).map((d) => d.qty));
+  return [
+    "d=" + series.slice(-HIST_OUT_DAYS).map((d) => b36(d.market)).join(","),
+    "w=" + a.weekly.values.map(b36).join(","),
+    "m=" + (monthly ?? a.monthly.values).map(b36).join(","),
+    "p=" + [...p.pct.map((x) => (x == null ? "" : int(x * 1000))), p.weeks, int(p.consistency * 100), p.reliable ? 1 : 0].join(","),
+    "t=" + [int(a.trend == null ? null : a.trend * 1000), b36(a.baseline), int(a.volatility == null ? null : a.volatility * 1000), b36(qtyUsual)].join(","),
+  ].join(";");
+}
+
+// Labels for the series above, shared by every item in a house.
+export function labels(days, months) {
+  const uniq = (xs) => [...new Set(xs)];
+  const q = (xs) => xs.map((x) => `"${x}"`).join(",");
+  return `dayLabels = { ${q(days.slice(-HIST_OUT_DAYS))} }, weekLabels = { ${q(uniq(days.map(weekKey)).slice(-12))} }, monthLabels = { ${q(months ?? uniq(days.map(monthKey)).slice(-12))} }`;
+}
