@@ -76,3 +76,17 @@ export function snapshotTime(...lastModified) {
 export function luaEscape(s) {
   return String(s).replace(/[\\"]/g, (c) => "\\" + c).replace(/\r/g, "\\r").replace(/\n/g, "\\n");
 }
+
+// Prices.lua is run as code in every player's game, so anything from an API that
+// goes into it must be what we expect. An item or house ID: a positive whole
+// number (or a string of digits); anything else is null and gets dropped.
+export function toId(x) {
+  const n = typeof x === "string" && /^\d+$/.test(x) ? Number(x) : x;
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+// A finite number above 0, or null.
+export function toPositive(x) {
+  const n = typeof x === "string" && x.trim() !== "" ? Number(x) : x;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
+}

@@ -18,7 +18,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { join } from "node:path";
 import { dayKey } from "./analysis.mjs";
-import { carryOverHistory, readGzJson, fetchRetry, diffPlausible, snapshotTime, luaEscape } from "./feed.mjs";
+import { carryOverHistory, readGzJson, fetchRetry, diffPlausible, snapshotTime, luaEscape, toId, toPositive } from "./feed.mjs";
 import { TIME_LEFT, toSnapshot, diffSnapshots, recordHour } from "./sales.mjs";
 import { trendingLists, encodeEntry } from "./trending.mjs";
 import {
@@ -75,8 +75,8 @@ async function listHouses(accessToken) {
   const { json } = await getJson(`/data/wow/ruleset/${AH_RULESET}/auctions/`, accessToken); // trailing slash required
   const all = (json.auctions ?? []).map((h) => {
     const name = typeof h.name === "string" ? h.name : (h.name?.en_GB ?? h.name?.en_US ?? "");
-    return { id: h.id, name, faction: name.split(" ")[0] || "Unknown" };
-  });
+    return { id: toId(h.id), name: String(name), faction: String(name).split(" ")[0] || "Unknown" };
+  }).filter((h) => h.id); // the ID goes into Prices.lua as code: whole numbers only
   if (AH_HOUSES === "all") return all;
   const wanted = new Set(AH_HOUSES.split(",").map((s) => Number(s.trim())));
   return all.filter((h) => wanted.has(h.id));
@@ -106,8 +106,10 @@ function summarize(listings) {
 async function fetchHouse(house, accessToken) {
   const listings = new Map();
   const raw = []; // [auctionId, itemId, qty, unitPrice, timeLeft] for the sales diff
-  const add = (auction, id, unit, qty, commodity = false) => {
-    if (!id || !(unit > 0) || !(qty > 0)) return;
+  // Only whole-number item IDs and real numbers: they end up in Prices.lua.
+  const add = (auction, rawId, rawUnit, rawQty, commodity = false) => {
+    const id = toId(rawId), unit = toPositive(rawUnit), qty = toId(rawQty);
+    if (!id || !unit || !qty) return;
     let rows = listings.get(id);
     if (!rows) listings.set(id, (rows = []));
     rows.push([unit, qty]);
@@ -159,7 +161,11 @@ async function salesPerDay() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const rows = await res.json();
     const out = {};
-    for (const r of rows) if (r.itemID && r.salesPerDay > 0) out[r.itemID] = Math.round(r.salesPerDay);
+    // A third-party service: keep only whole-number IDs and real numbers (Prices.lua is code).
+    for (const r of Array.isArray(rows) ? rows : []) {
+      const id = toId(r?.itemID), n = toPositive(r?.salesPerDay);
+      if (id && n) out[id] = Math.round(n);
+    }
     return out;
   } catch (e) {
     console.log(`Saddlebag sales per day unavailable: ${e.message}`);

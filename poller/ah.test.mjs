@@ -101,3 +101,29 @@ test("A7d: quotes and backslashes in house names don't break Prices.lua", async 
   const lua = await r.lua();
   assert.ok(lua.includes('name = "Horde \\"Old\\" Realm\\\\X", faction = "Horde",'), lua.slice(0, 600));
 });
+
+test("security: hostile IDs and numbers from Saddlebag or Blizzard never reach Prices.lua", async () => {
+  const evil = '1]=1 RunScript("x") t={[2';
+  const r = await runFeed({
+    houses: [{ id: 113, name: "Horde" }, { id: evil, name: "Bad house" }],
+    data: { 113: { auctions: [
+      listing(1, 2589, 5, 50),
+      { id: 2, item: { id: evil }, quantity: 5, buyout: 250, time_left: "LONG" },
+      { id: 3, item: { id: 2318 }, quantity: "5 RunScript", buyout: 250, time_left: "LONG" },
+    ] } },
+    saddlebag: [
+      { itemID: 2589, salesPerDay: 12.4 },
+      { itemID: "2318", salesPerDay: "7" },
+      { itemID: evil, salesPerDay: 5 },
+      { itemID: 4306, salesPerDay: '9 RunScript("y")' },
+    ],
+  });
+  assert.equal(r.code, 0, r.out);
+  const lua = await r.lua();
+  assert.ok(!lua.includes("RunScript"), "no injected code");
+  assert.ok(!lua.includes("Bad house"), "a house without a numeric ID is dropped");
+  assert.match(lua, /\[2589\]=12,/);
+  assert.match(lua, /\[2318\]=7,/);
+  assert.doesNotMatch(lua, /\[4306\]=/);
+  assert.match(lua, /\[2589\]="50,50,5,/);
+});

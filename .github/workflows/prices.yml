@@ -33,13 +33,15 @@ jobs:
   prices:
     runs-on: ubuntu-latest
     timeout-minutes: 120   # the work takes ~5 minutes; the rest is waiting for the next hour
+    # The write token (git push, releases, starting runs) goes only to the steps that
+    # need it, not to the ones running the feed or its tests.
     env:
-      REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-      GH_TOKEN: ${{ github.token }}
       KEEP_RELEASES: 48
     steps:
       - name: Skip if a fresh release exists
         id: fresh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           last=$(gh release list -R "${{ github.repository }}" --limit 1 --json createdAt --jq '.[0].createdAt' || true)
@@ -63,6 +65,8 @@ jobs:
 
       - name: Get previous history
         if: steps.fresh.outputs.skip != 'true'
+        env:
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         # No history branch yet (ls-remote exit 2): start empty. Any other failure stops
         # the run, so a network hiccup never replaces the real history with an empty one.
         run: |
@@ -93,6 +97,8 @@ jobs:
       # History lives on its own branch, replaced every run (one commit, so the repo doesn't grow).
       - name: Keep history
         if: steps.fresh.outputs.skip != 'true'
+        env:
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         run: |
           cd out/history
           git init --quiet --initial-branch history
@@ -115,6 +121,8 @@ jobs:
 
       - name: Publish release
         if: steps.fresh.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.build.outputs.tag }}" dist/CutpurseLedger-*.zip \
             --title "${{ steps.build.outputs.title }}" \
@@ -141,6 +149,8 @@ jobs:
 
       - name: Prune old releases
         if: steps.fresh.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release list --limit 300 --json tagName,createdAt \
             --jq "sort_by(.createdAt) | reverse | .[${KEEP_RELEASES}:] | .[].tagName" |
@@ -151,6 +161,8 @@ jobs:
       # feed never stops just because nobody pushed code for a while.
       - name: Keep schedule alive
         if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$(date -u +%H)" = "03" ]; then
             gh api -X PUT "repos/${{ github.repository }}/actions/workflows/prices.yml/enable" && echo "schedule refreshed"
@@ -163,6 +175,7 @@ jobs:
       - name: Start the next run
         if: always()
         env:
+          GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.run_id }}
         run: |
           now=$(date -u +%s)

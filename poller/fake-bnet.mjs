@@ -3,7 +3,8 @@
 // FAKE_BNET is the path of a JSON file:
 //   { houses: [{ id, name }],
 //     data: { "<house>": { auctions: [...], commodities: [...], lm, clm, status, throws } },
-//     tokenFailures: n }   // first n token requests throw a network error
+//     tokenFailures: n,    // first n token requests throw a network error
+//     saddlebag: [...] }   // Saddlebag Exchange's answer (default: HTTP 500)
 // Every request is appended to <FAKE_BNET>.log (one line: url and whether it had a signal).
 import { readFileSync, appendFileSync } from "node:fs";
 
@@ -21,7 +22,7 @@ globalThis.fetch = async (input, init = {}) => {
     if (tokenCalls++ < (spec.tokenFailures ?? 0)) throw new TypeError("fetch failed");
     return json({ access_token: "t" });
   }
-  if (url.host.includes("saddlebag")) return json({}, {}, 500);
+  if (url.host.includes("saddlebag")) return spec.saddlebag ? json(spec.saddlebag) : json({}, {}, 500);
   const m = url.pathname.match(/\/auctions\/(\d+)(\/commodities)?$/);
   if (!m) return json({ auctions: spec.houses.map((h) => ({ id: h.id, name: h.name })) });
   const d = spec.data[m[1]] ?? {};

@@ -39,6 +39,13 @@ try {
   $zip = Join-Path $tmp $asset.name
   Invoke-WebRequest $asset.browser_download_url -OutFile $zip -UseBasicParsing
   Expand-Archive $zip -DestinationPath (Join-Path $tmp "x")
+  # Check the download has both folders before removing anything, so a bad
+  # release can't leave you without the addon.
+  foreach ($folder in "LootLedger", "LootLedger_Prices") {
+    if (-not (Test-Path (Join-Path $tmp "x\$folder\$folder.toc"))) {
+      throw "The release $($release.name) has no $folder folder; nothing was changed."
+    }
+  }
   foreach ($folder in "LootLedger", "LootLedger_Prices") {
     $dest = Join-Path $AddOns $folder
     if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
