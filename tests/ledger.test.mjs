@@ -39,3 +39,45 @@ test("harness: one AH sale mail is logged as a sale, the deposit apart", () => {
   assert.deepEqual(log(), ["ah_sale 950 x20", "ah_deposit_back 30"]);
   assert.deepEqual(trade(), ["Sale 2589 20 950"]);
 });
+
+const expired = (item, id, count) => `{ sender = "Auction House", subject = "Auction expired: ${item}", items = { [1] = { id = ${id}, count = ${count} } } }`;
+
+test("B1: two expired mails for the same item, opened in a row, are two returns", () => {
+  const { run, trade } = vm();
+  run(`INBOX[1] = ${expired("Linen Cloth", 2589, 20)}
+       INBOX[2] = ${expired("Linen Cloth", 2589, 20)}
+       AutoLootMailItem(1); SERVER_TAKE_ITEM(1, 1)   -- first mail emptied and removed; the second moves up
+       ADVANCE(1)
+       AutoLootMailItem(1); SERVER_TAKE_ITEM(1, 1)`);
+  assert.deepEqual(trade(), ["Returned 2589 20", "Returned 2589 20"]);
+});
+
+test("B1: with full bags, clicking the same mail again later records nothing until the items really arrive", () => {
+  const { run, trade } = vm();
+  run(`INBOX[1] = ${expired("Linen Cloth", 2589, 20)}
+       TakeInboxItem(1, 1); FIRE("MAIL_INBOX_UPDATE")   -- bags full: nothing moves
+       ADVANCE(6)
+       TakeInboxItem(1, 1); FIRE("MAIL_INBOX_UPDATE")`);
+  assert.deepEqual(trade(), []);
+  run(`ADVANCE(6)
+       TakeInboxItem(1, 1); SERVER_TAKE_ITEM(1, 1)`);
+  assert.deepEqual(trade(), ["Returned 2589 20"]);
+});
+
+test("B1: a return waiting for its mail is dropped when the mailbox closes or after a few seconds", () => {
+  const { run, trade } = vm();
+  run(`INBOX[1] = ${expired("Linen Cloth", 2589, 20)}
+       TakeInboxItem(1, 1); FIRE("MAIL_CLOSED"); SERVER_TAKE_ITEM(1, 1)
+       INBOX[1] = ${expired("Light Leather", 2318, 5)}
+       TakeInboxItem(1, 1); ADVANCE(10); SERVER_TAKE_ITEM(1, 1)`);
+  assert.deepEqual(trade(), []);
+});
+
+test("B1: another mail leaving doesn't count a waiting click", () => {
+  const { run, trade } = vm();
+  run(`INBOX[1] = { sender = "Bob", subject = "hi", money = 500 }
+       INBOX[2] = ${expired("Linen Cloth", 2589, 20)}
+       TakeInboxItem(2, 1)          -- bags full, nothing moves
+       TakeInboxMoney(1); SERVER_TAKE_MONEY(1)`);
+  assert.deepEqual(trade(), []);
+});

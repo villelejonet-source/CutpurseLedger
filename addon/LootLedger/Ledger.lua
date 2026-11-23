@@ -263,20 +263,77 @@ function L.Invoice(index)
     net = (bid or 0) - (consignment or 0), deposit = deposit or 0 }
 end
 
-local lastReturn = {}  -- index -> time, so one click isn't counted twice
-local function OnMailItems(index, attachment)
-  if not (GetInboxHeaderInfo and GetInboxItem) then return end
-  local subject = select(4, GetInboxHeaderInfo(index))
-  if not IsReturnedAuction(subject) then return end
-  local key = index .. ":" .. tostring(attachment) .. ":" .. subject
-  if lastReturn[key] and GetTime() - lastReturn[key] < 5 then return end
-  lastReturn[key] = GetTime()
-  local first, last = attachment or 1, attachment or (ATTACHMENTS_MAX_RECEIVE or 16)
-  for a = first, last do
-    local name, itemID, _, count = GetInboxItem(index, a)
-    if name then ns.Trade.Returned(itemID or ns.Trade.ItemIDByName(name), count or 1) end
+-- Items from an expired/cancelled auction count as returned only once they have
+-- really left the mailbox (full bags: nothing happens). A click remembers what it
+-- was for (item and stack size); when the number of such attachments in returned-
+-- auction mails drops, that many clicks are recorded, oldest first. Counting rather
+-- than looking at the clicked index survives mails shifting up when one is removed,
+-- and two identical mails ("Auction expired: Linen Cloth" twice) count twice.
+local RETURN_WAIT = 5     -- seconds a click waits for its attachment to leave
+local pendingReturns = {} -- "id:count" -> { id, count, base = attachments like it when clicked, clicks = { { index, a, at } } }
+
+local function AttachmentID(index, a)
+  local name, itemID, _, count = GetInboxItem(index, a)
+  if not name then return nil end
+  return itemID or ns.Trade.ItemIDByName(name), count or 1
+end
+
+-- How many attachments of this item and stack size are in returned-auction mails.
+local function CountReturned(id, count)
+  local n = 0
+  for i = 1, (GetInboxNumItems and GetInboxNumItems() or 0) do
+    if IsReturnedAuction(select(4, GetInboxHeaderInfo(i))) then
+      for a = 1, (ATTACHMENTS_MAX_RECEIVE or 16) do
+        local aid, acount = AttachmentID(i, a)
+        if aid == id and acount == count then n = n + 1 end
+      end
+    end
+  end
+  return n
+end
+
+local function CheckReturns()
+  for key, r in pairs(pendingReturns) do
+    for i = #r.clicks, 1, -1 do
+      if GetTime() - r.clicks[i].at > RETURN_WAIT then table.remove(r.clicks, i) end
+    end
+    if #r.clicks > 0 then
+      local left = r.base - CountReturned(r.id, r.count)
+      while left > 0 and #r.clicks > 0 do
+        table.remove(r.clicks, 1)
+        r.base, left = r.base - 1, left - 1
+        ns.Trade.Returned(r.id, r.count)
+      end
+    end
+    if #r.clicks == 0 then pendingReturns[key] = nil end
   end
 end
+
+local function OnMailItems(index, attachment)
+  if not (GetInboxHeaderInfo and GetInboxItem) then return end
+  if not IsReturnedAuction(select(4, GetInboxHeaderInfo(index))) then return end
+  CheckReturns()  -- settle earlier clicks first: what's still pending hasn't left yet
+  local first, last = attachment or 1, attachment or (ATTACHMENTS_MAX_RECEIVE or 16)
+  for a = first, last do
+    local id, count = AttachmentID(index, a)
+    if id then
+      local key = id .. ":" .. count
+      local r = pendingReturns[key]
+      if not r then
+        r = { id = id, count = count, base = CountReturned(id, count), clicks = {} }
+        pendingReturns[key] = r
+      end
+      local again  -- the same attachment clicked again, nothing left since: one click
+      for _, c in ipairs(r.clicks) do
+        if c.index == index and c.a == a then again = c end
+      end
+      if again then again.at = GetTime()
+      else r.clicks[#r.clicks + 1] = { index = index, a = a, at = GetTime() } end
+    end
+  end
+end
+ns.On("MAIL_INBOX_UPDATE", CheckReturns)
+ns.On("MAIL_CLOSED", function() pendingReturns = {} end)
 
 local function OnMailTake(index)
   local inv = L.Invoice(index)
