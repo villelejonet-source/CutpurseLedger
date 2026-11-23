@@ -126,8 +126,8 @@ function A.Decide(id)
     d.reason = d.reason .. ", slow seller"
   end
   -- Demand signals: trending now, or wanted for high-level quests.
-  local trend = ns.Prices.Trending and ns.Prices.Trending()
-  local tr = trend and trend.byItem[id]
+  local trending = ns.Prices.Trending and ns.Prices.Trending()
+  local tr = trending and trending.byItem[id]
   if tr and (tr.list == "hot" or tr.list == "drying") then d.reason = d.reason .. ", in demand right now" end
   local questLevel = ns.Quests and ns.Quests.Level(id)
   if questLevel and questLevel >= 50 then d.reason = d.reason .. ", people buy it for quests" end

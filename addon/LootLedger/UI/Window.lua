@@ -705,7 +705,6 @@ local function Subtitle()
   end
   subtitle:SetText(text)
 end
-win:HookScript("OnShow", Subtitle)
 
 ns.OnRefresh(function()
   if not win:IsShown() or not mainTab then return end

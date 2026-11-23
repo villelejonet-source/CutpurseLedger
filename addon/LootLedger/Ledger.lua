@@ -381,6 +381,8 @@ local function OnMailTake(index)
   local inv = L.Invoice(index)
   if inv then Flag("ah_sale", inv.name, inv.n, inv); return end
   local sender = GetInboxHeaderInfo and select(3, GetInboxHeaderInfo(index))
+  -- English clients only: other locales name the AH sender differently, and their
+  -- refunds are logged as "Mail received".
   if sender and sender:find("Auction", 1, true) then Flag("ah_refund") else Flag("mail_in") end
 end
 Hook("TakeInboxMoney", OnMailTake)

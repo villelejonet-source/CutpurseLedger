@@ -66,7 +66,7 @@ local function Check(e)
   local qtyText = e.qty > 1 and (" x" .. e.qty) or ""
   if not ah then
     ns.Print("|cffff9933Heads up:|r you vendored " .. e.link .. qtyText ..
-      ". It's white or better and TSM has no AH price for it yet, so check the AH next time.")
+      ". It's white or better and there is no AH price for it yet, so check the AH next time.")
     return
   end
   local ahNet = math.floor(ah * (1 - A.SETTINGS.ahCut)) * e.qty
