@@ -145,3 +145,14 @@ test("B3: a sale is matched by its amount; clicks before it that sold nothing ar
   assert.deepEqual(log(), ["vendor_sell 300 2318 x20", "vendor_sell 777", "vendor_sell 52 2589 x4"]);
   assert.deepEqual(trade(), ["Vendored 2318 20 300", "Vendored 2589 4 52"]);
 });
+
+test("B4: clicking a sale mail whose money is already taken doesn't label the next money change", () => {
+  const { run, log, trade } = vm();
+  run(`INBOX[1] = { sender = "Auction House", subject = "Auction successful: Linen Cloth", money = 0,
+                    invoice = { item = "Linen Cloth", bid = 1000, cut = 50, deposit = 30, count = 20 } }
+       INBOX[2] = { sender = "Bob", subject = "for you", money = 500 }
+       AutoLootMailItem(1)
+       TakeInboxMoney(2); SERVER_TAKE_MONEY(2)`);
+  assert.deepEqual(log(), ["mail_in 500"]);
+  assert.deepEqual(trade(), []);
+});

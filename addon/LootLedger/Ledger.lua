@@ -370,6 +370,10 @@ ns.On("MAIL_INBOX_UPDATE", CheckReturns)
 ns.On("MAIL_CLOSED", function() pendingReturns = {} end)
 
 local function OnMailTake(index)
+  -- No money on the mail (already taken, or an item-only mail): no money change is
+  -- coming, so a flag would only mislabel the next one.
+  local money = GetInboxHeaderInfo and select(5, GetInboxHeaderInfo(index))
+  if not money or money <= 0 then return end
   local inv = L.Invoice(index)
   if inv then Flag("ah_sale", inv.name, inv.n, inv); return end
   local sender = GetInboxHeaderInfo and select(3, GetInboxHeaderInfo(index))
