@@ -107,13 +107,14 @@ function ns.SkillRank(name)
   end
 end
 
+-- link, stack count, and whether the item has no sell value
 function ns.ContainerItem(bag, slot)
   if C_Container and C_Container.GetContainerItemInfo then
     local info = C_Container.GetContainerItemInfo(bag, slot)
-    if info then return info.hyperlink, info.stackCount end
+    if info then return info.hyperlink, info.stackCount, info.hasNoValue end
   elseif GetContainerItemInfo then
-    local _, count, _, _, _, _, link = GetContainerItemInfo(bag, slot)
-    return link, count
+    local _, count, _, _, _, _, link, _, noValue = GetContainerItemInfo(bag, slot)
+    return link, count, noValue
   end
 end
 

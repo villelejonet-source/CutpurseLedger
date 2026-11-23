@@ -175,8 +175,19 @@ local function Classify(delta)
   if f then return f.source, f.item, f.qty, f.data end
   if Active("trade") then return "trade" end
   if Active("merchant") then
-    local item = table.remove(delta > 0 and sellQueue or buyQueue, 1)
-    return delta > 0 and "vendor_sell" or "vendor_buy", item and item.link, item and item.qty
+    if delta < 0 then
+      local item = table.remove(buyQueue, 1)
+      return "vendor_buy", item and item.link, item and item.qty
+    end
+    -- A sale: the first queued item whose sell price matches the money. Items queued
+    -- before it never sold (the click did nothing); with no match, no item is named.
+    for i, item in ipairs(sellQueue) do
+      if item.price * item.qty == delta then
+        for _ = 1, i do table.remove(sellQueue, 1) end
+        return "vendor_sell", item.link, item.qty
+      end
+    end
+    return "vendor_sell"
   end
   if Active("mail") then return delta > 0 and "mail_in" or "mail_out" end
   if Active("auction") then return delta > 0 and "ah_refund" or "ah_buy" end
@@ -195,8 +206,9 @@ local Flag, Hook = L.Flag, ns.Hook
 local function OnUseContainerItem(bag, slot)
   if InRepairMode and InRepairMode() then Flag("repair"); return end
   if open.merchant then
-    local link, count = ns.ContainerItem(bag, slot)
-    if link then sellQueue[#sellQueue + 1] = { link = link, qty = count or 1 } end
+    local link, count, noValue = ns.ContainerItem(bag, slot)
+    local price = link and not noValue and ns.SellPrice(link) or 0
+    if price > 0 then sellQueue[#sellQueue + 1] = { link = link, qty = count or 1, price = price } end
   end
 end
 if C_Container and type(C_Container.UseContainerItem) == "function" then

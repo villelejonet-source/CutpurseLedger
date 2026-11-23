@@ -120,3 +120,28 @@ test("B2: a flag of the other direction stays queued for its own money", () => {
   assert.deepEqual(log(), ["ah_refund 500", "ah_deposit -60"]);
   assert.deepEqual(trade(), ["Posted 2589 20 60"]);
 });
+
+test("B3: right-clicking an item with no sell price doesn't take the next sale's gold", () => {
+  const { run, log, trade } = vm();
+  run(`FIRE("MERCHANT_SHOW")
+       BAGS[0] = { [1] = { id = 5000, count = 1 }, [2] = { id = 2318, count = 20 } }
+       C_Container.UseContainerItem(0, 1)   -- quest item: can't be sold
+       C_Container.UseContainerItem(0, 2)
+       GAIN(300)`);
+  assert.deepEqual(log(), ["vendor_sell 300 2318 x20"]);
+  assert.deepEqual(trade(), ["Vendored 2318 20 300"]);
+});
+
+test("B3: a sale is matched by its amount; clicks before it that sold nothing are dropped", () => {
+  const { run, log, trade } = vm();
+  run(`FIRE("MERCHANT_SHOW")
+       BAGS[0] = { [1] = { id = 2319, count = 5 }, [2] = { id = 2318, count = 20 }, [3] = { id = 2589, count = 4 } }
+       C_Container.UseContainerItem(0, 1)   -- didn't sell (say, the vendor refused)
+       C_Container.UseContainerItem(0, 2)
+       C_Container.UseContainerItem(0, 3)
+       GAIN(300)                            -- 20 x 15: the Light Leather
+       GAIN(777)                            -- matches nothing queued: no item named
+       GAIN(52)                             -- 4 x 13: the Linen Cloth`);
+  assert.deepEqual(log(), ["vendor_sell 300 2318 x20", "vendor_sell 777", "vendor_sell 52 2589 x4"]);
+  assert.deepEqual(trade(), ["Vendored 2318 20 300", "Vendored 2589 4 52"]);
+});
