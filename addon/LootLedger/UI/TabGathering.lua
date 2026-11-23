@@ -49,7 +49,7 @@ local function RenderSummary(period)
       value = ns.Money(e.value), bar = list[1].value > 0 and e.value / list[1].value or 0 }
   end
   rows[#rows + 1] = { kind = "note",
-    text = "Value = gold looted + items at their AH market price. Items without an AH price count as 0." }
+    text = "Value = gold looted + items at what you really get for them: your own recent sales, or the AH price when you looted them (after the AH cut). Estimates, not counted in Profit." }
   return rows
 end
 
@@ -59,17 +59,18 @@ local function RenderActivity(a, period)
   local rows = { { kind = "title", icon = T.ActivityIcon(a), text = a.label .. "  ·  " .. title, sub = sub } }
   local unitName = a.unit:gsub("s$", "")
   local tries = t.count + t.empty
-  local value = G.Value(t)
+  local itemsValue, priced, unpriced, fromSales = G.ItemsValue(t.items, t)
+  local value = t.copper + itemsValue
 
   local third
   if period == "session" then
     local gph = G.PerHour(a.key)
     third = { label = "Per hour", value = gph and ns.Money(gph) or "--", color = C.green }
   else
-    third = { label = "Average per " .. unitName, value = t.count > 0 and ns.Money(value / t.count) or "--", color = C.blue }
+    third = { label = "Per " .. unitName, value = t.count > 0 and ns.Money(math.floor(value / t.count)) or "--", color = C.blue }
   end
   rows[#rows + 1] = { kind = "tiles", tiles = {
-    { label = "Total value", value = ns.Money(value) },
+    { label = "Earned (est.)", value = ns.Money(value) },
     { label = a.unit:gsub("^%l", string.upper), value = tostring(t.count), color = C.muted },
     third,
   } }
@@ -86,34 +87,66 @@ local function RenderActivity(a, period)
   end
 
   rows[#rows + 1] = { kind = "section", text = "Breakdown" }
-  rows[#rows + 1] = { kind = "row", icon = T.GOLD_ICON, label = "Gold looted", value = ns.Money(t.copper) }
-  local itemsValue, _, unpriced = G.ItemsValue(t.items)
-  rows[#rows + 1] = { kind = "row", icon = T.BAG_ICON, label = "Items", note = "at AH price",
-    value = ns.Money(itemsValue) }
+  if t.copper > 0 then
+    rows[#rows + 1] = { kind = "row", icon = T.GOLD_ICON, label = "Gold looted", note = "exact", value = ns.Money(t.copper) }
+  end
+  if priced > 0 then
+    local pct = math.floor(fromSales / priced * 100 + 0.5)
+    rows[#rows + 1] = { kind = "row", icon = T.BAG_ICON, label = "Items (est.)",
+      note = pct > 0 and (pct .. "% priced from your own sales") or "priced from AH listings",
+      value = ns.Money(itemsValue) }
+  end
   if unpriced > 0 then
-    rows[#rows + 1] = { kind = "row", label = unpriced .. " items without an AH price",
-      note = "not listed on your AH right now, counted as 0", value = T.Color("?", C.muted) }
+    rows[#rows + 1] = { kind = "row", label = unpriced .. " items without any price",
+      note = "never on your AH and never sold by you, counted as 0", value = T.Color("?", C.muted) }
+  end
+
+  -- Real sales of what this character gathered (all time), and what's left.
+  local b = G.Bucket(a.key)
+  local owned = ns.Inventory.AllItems()
+  local soldNet, heldValue, any = 0, 0, false
+  for id, n in pairs(b.items or {}) do
+    local c = ns.Trade.Credit(id, n, owned[id] and owned[id].total or 0)
+    if c.sold > 0 then soldNet, any = soldNet + c.soldNet, true end
+    if c.held > 0 then
+      local v = G.ItemValue(id, c.held, b)
+      if v then heldValue, any = heldValue + v, true end
+    end
+  end
+  if any then
+    rows[#rows + 1] = { kind = "row", label = "Sold so far", note = "real gold after AH cut, all time",
+      value = ns.Money(math.floor(soldNet + 0.5)) }
+    rows[#rows + 1] = { kind = "row", label = "Still holding", note = "what you still own of it, est.",
+      value = ns.Money(math.floor(heldValue + 0.5)) }
   end
   rows[#rows + 1] = { kind = "row", label = "Empty " .. a.unit, value = tostring(t.empty) }
   if period == "all" and t.best and t.best > 0 then
     rows[#rows + 1] = { kind = "row", label = "Best single " .. unitName, value = ns.Money(t.best) }
   end
 
-  -- Items looted
-  local b = G.Bucket(a.key)
+  -- Items looted, with how each is valued
   local ids = {}
   for id in pairs(t.items or {}) do ids[#ids + 1] = id end
-  table.sort(ids, function(x, y) return t.items[x] > t.items[y] end)
+  local vals = {}
+  for _, id in ipairs(ids) do vals[id] = { G.ItemValue(id, t.items[id], t) } end
+  table.sort(ids, function(x, y) return (vals[x][1] or 0) > (vals[y][1] or 0) end)
   if #ids > 0 then
-    rows[#rows + 1] = { kind = "section", text = "Items looted" }
-    local top = t.items[ids[1]]
-    for i = 1, math.min(8, #ids) do
+    rows[#rows + 1] = { kind = "section", text = "Items looted", right = T.Color("valued at", C.muted) }
+    local top = vals[ids[1]][1] or 0
+    for i = 1, math.min(10, #ids) do
       local id = ids[i]
+      local v, info = vals[id][1], vals[id][2]
       local it = ns.acc.items and ns.acc.items[id]
       local name = b.names[id] or ("item " .. id)
+      local how
+      if not v then how = "no price"
+      elseif info.source == "sales" then how = "your avg " .. ns.Money(math.floor(info.unit + 0.5)) .. " (" .. info.sales .. (info.sales == 1 and " sale)" or " sales)")
+      elseif info.source == "blend" then how = ns.Money(math.floor(info.unit + 0.5)) .. " each (" .. info.sales .. (info.sales == 1 and " sale" or " sales") .. " + AH)"
+      else how = (info.lootPrice and "AH price when looted, " or "AH price now, ") .. ns.Money(math.floor(info.unit + 0.5)) .. " each" end
       rows[#rows + 1] = { kind = "row", icon = T.ItemIcon(id), itemID = id,
-        label = T.QualityText(name, it and it.quality), value = t.items[id] .. "x",
-        bar = t.items[id] / top, barColor = C.blue }
+        label = T.QualityText(name, it and it.quality) .. T.Color(" x" .. t.items[id], C.muted), note = how,
+        value = v and ns.Money(math.floor(v + 0.5)) or T.Color("?", C.muted),
+        bar = top > 0 and (v or 0) / top or 0, barColor = C.blue }
     end
   end
 

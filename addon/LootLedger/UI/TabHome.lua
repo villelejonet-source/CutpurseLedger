@@ -89,6 +89,17 @@ local function Render(_, period)
       note = string.format("%d%%", math.floor(x.v / inc * 100 + 0.5)),
       value = ns.Money(x.v), bar = x.v / list[1].v, barColor = C.green }
   end
+  -- What your gathering produced, valued at what you really get for it (not gold yet).
+  local G = ns.Gathering
+  local gathered = 0
+  for _, a in ipairs(G.ACTIVITIES) do
+    local t = G.Sum(a.key, period)
+    gathered = gathered + G.ItemsValue(t.items, t)
+  end
+  if gathered > 0 then
+    rows[#rows + 1] = { kind = "row", icon = T.BAG_ICON, label = "Gathered items (est.)",
+      note = "not in Profit until sold", value = T.Color(ns.Money(gathered), C.muted) }
+  end
   if #list > 3 then
     rows[#rows + 1] = { kind = "note", text = "Everything else, plus spending and gathering details: Earnings tab." }
   end

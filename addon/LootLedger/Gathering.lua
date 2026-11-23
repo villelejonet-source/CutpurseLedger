@@ -19,7 +19,7 @@ for _, a in ipairs(G.ACTIVITIES) do G.BY_KEY[a.key] = a end
 G.session = {}
 local function ResetSession()
   for _, a in ipairs(G.ACTIVITIES) do
-    G.session[a.key] = { copper = 0, value = 0, count = 0, empty = 0, items = {} }
+    G.session[a.key] = { copper = 0, value = 0, count = 0, empty = 0, items = {}, lootV = {}, lootN = {} }
   end
 end
 ResetSession()
@@ -44,6 +44,7 @@ function G.Bucket(key)
     b = { copper = 0, value = 0, count = 0, empty = 0, best = 0, items = {}, names = {}, days = {} }
     ns.db.acts[key] = b
   end
+  b.lootV, b.lootN = b.lootV or {}, b.lootN or {}  -- added in 3.12
   return b
 end
 
@@ -55,6 +56,7 @@ function G.Day(b)
     b.days[k] = d
   end
   d.items = d.items or {}  -- days saved before 3.3 have no item list
+  d.lootV, d.lootN = d.lootV or {}, d.lootN or {}
   return d
 end
 
@@ -70,41 +72,70 @@ function G.Sum(key, period)
   if period == "session" then return G.session[key] end
   local b = G.Bucket(key)
   if period == "all" then return b end
-  local t = { copper = 0, value = 0, count = 0, empty = 0, items = {} }
+  local t = { copper = 0, value = 0, count = 0, empty = 0, items = {}, lootV = {}, lootN = {} }
   for d = 0, ns.PeriodDays(period) - 1 do
     local day = b.days[ns.DayKey(d)]
     if day then
       t.copper, t.value = t.copper + day.copper, t.value + day.value
       t.count, t.empty = t.count + day.count, t.empty + day.empty
       for id, n in pairs(day.items or {}) do t.items[id] = (t.items[id] or 0) + n end
+      for id, v in pairs(day.lootV or {}) do t.lootV[id] = (t.lootV[id] or 0) + v end
+      for id, n in pairs(day.lootN or {}) do t.lootN[id] = (t.lootN[id] or 0) + n end
     end
   end
   return t
 end
 
--- Looted items are valued at their AH price only (TSM's latest price).
--- Items without an AH price count as 0 and are reported as "unpriced".
-function G.ItemWorth(id)
+-- What a looted item is worth. Loot is valued at what YOU really get for it:
+--   1. your own recent sales of that item (after the AH cut and lost deposits),
+--   2. otherwise the AH price at the moment you looted it, after the 5% cut
+--      (saved with the loot, so past days don't change when the market moves),
+--   3. otherwise today's AH price after the cut (loot without a saved price).
+-- See Trade.lua for how your own sale price is worked out.
+
+local function Cut() return 1 - ((ns.Advisor and ns.Advisor.SETTINGS.ahCut) or 0.05) end
+
+-- Today's AH price after the cut, per unit, or nil.
+function G.NetNow(id)
   local p = ns.Prices and ns.Prices.Get(id)
-  return p and ns.Prices.AHPrice(p) or nil
+  local ah = p and p.hasAH and ns.Prices.AHPrice(p)
+  return ah and math.floor(ah * Cut()) or nil
+end
+G.ItemWorth = G.NetNow  -- older name
+
+-- Value of n units of one item from a G.Sum result (t holds the saved loot prices).
+-- Returns value (or nil if nothing is known), info from ns.Trade.UnitValue.
+function G.ItemValue(id, n, t)
+  local fallback
+  local ln = t and t.lootN and t.lootN[id]
+  if ln and ln > 0 then fallback = t.lootV[id] / ln else fallback = G.NetNow(id) end
+  local unit, info = ns.Trade.UnitValue(id, fallback)
+  if not unit then return nil, info end
+  info.unit = unit
+  info.lootPrice = ln and ln > 0  -- the listing price is the one saved at loot time
+  return unit * n, info
 end
 
--- Worth of a set of looted items { [id] = n }.
--- Returns total, units with an AH price, units without one.
-function G.ItemsValue(items)
-  local total, priced, unpriced = 0, 0, 0
+-- Worth of the items in a G.Sum result.
+-- Returns total, units valued, units without any price, units valued from your own sales.
+function G.ItemsValue(items, t)
+  local total, priced, unpriced, fromSales = 0, 0, 0, 0
   for id, n in pairs(items or {}) do
-    local worth = G.ItemWorth(id)
-    if worth then total, priced = total + worth * n, priced + n
-    else unpriced = unpriced + n end
+    local v, info = G.ItemValue(id, n, t)
+    if v then
+      total, priced = total + v, priced + n
+      if info.source == "sales" then fromSales = fromSales + n
+      elseif info.source == "blend" then fromSales = fromSales + n * 0.5 end
+    else
+      unpriced = unpriced + n
+    end
   end
-  return total, priced, unpriced
+  return math.floor(total + 0.5), priced, unpriced, fromSales
 end
 
--- Total worth of a G.Sum result: gold looted + items at AH price.
--- (Days saved before 3.3 have no item list, so only their gold counts.)
+-- Total worth of a G.Sum result: gold looted + items (estimated, see above).
 function G.Value(t)
-  return t.copper + G.ItemsValue(t.items)
+  return t.copper + G.ItemsValue(t.items, t)
 end
 
 -- The activity whose loot window is open right now, or nil.
@@ -127,6 +158,7 @@ local function AddItem(link, qty)
   local key = current.key
   local b = G.Bucket(key)
   local worth = ns.SellPrice(link) * qty
+  local net = G.NetNow(id)  -- lock today's AH price (after the cut) to this loot
   b.items[id] = (b.items[id] or 0) + qty
   b.names[id] = link:match("%[(.-)%]") or b.names[id]
   b.value = b.value + worth
@@ -136,7 +168,13 @@ local function AddItem(link, qty)
   local s = G.session[key]
   s.value = s.value + worth
   s.items[id] = (s.items[id] or 0) + qty
-  current.total = current.total + (G.ItemWorth(id) or 0) * qty  -- for "best single"
+  if net then
+    for _, t in ipairs({ b, d, s }) do
+      t.lootV[id] = (t.lootV[id] or 0) + net * qty
+      t.lootN[id] = (t.lootN[id] or 0) + qty
+    end
+  end
+  current.total = current.total + (net or 0) * qty  -- for "best single"
   current.got = true
 end
 
@@ -158,7 +196,32 @@ end
 ---------------------------------------------------------------------------
 -- Startup and events
 ---------------------------------------------------------------------------
+-- 3.12: loot from before has no saved price. Give it today's AH price once (after
+-- the cut), so it stops moving with the market from now on.
+local function LockOldLoot()
+  if ns.db.lootPricesFrom then return end
+  if not (ns.Prices and ns.Prices.Status().source ~= "none") then return end  -- try again next login
+  for key in pairs(ns.db.acts) do
+    local b = G.Bucket(key)
+    local function Lock(t)
+      t.lootV, t.lootN = t.lootV or {}, t.lootN or {}
+      for id, n in pairs(t.items or {}) do
+        local have = t.lootN[id] or 0
+        local net = n > have and G.NetNow(id)
+        if net then
+          t.lootV[id] = (t.lootV[id] or 0) + net * (n - have)
+          t.lootN[id] = n
+        end
+      end
+    end
+    Lock(b)
+    for _, d in pairs(b.days) do Lock(d) end
+  end
+  ns.db.lootPricesFrom = time()
+end
+
 ns.OnInit(function()
+  LockOldLoot()
   for _, a in ipairs(G.ACTIVITIES) do
     local n = ns.SpellName(a.spell)
     if n then spellToActivity[n] = a end

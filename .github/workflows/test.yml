@@ -15,6 +15,10 @@ jobs:
           node-version: 24
       - name: Feed tests
         run: node --test poller/*.test.mjs
+      - name: Addon tests (Lua, in fengari)
+        run: |
+          npm install --silent --no-save fengari@0.1.4
+          node --test tests/*.test.mjs
       - name: Lua syntax (addon)
         run: |
           npm install --silent --no-save luaparse@0.3.1

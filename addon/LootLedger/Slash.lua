@@ -36,6 +36,48 @@ SlashCmdList.LOOTLEDGER = function(msg)
       if not id then ns.Print("No item you've owned matches \"" .. query .. "\". Try shift-clicking an item link instead.") end
     end
     if id then ns.OpenMarket(id) else ns.OpenTab("market") end
+  elseif msg == "debug mail" then
+    -- What the game reports for each mail: checks the AH sale details we rely on.
+    if not (GetInboxNumItems and GetInboxHeaderInfo) then ns.Print("Mail API not available.") return end
+    local n = GetInboxNumItems()
+    if n == 0 then ns.Print("Open your mailbox first (or it's empty).") return end
+    for i = 1, n do
+      local _, _, sender, subject, money = GetInboxHeaderInfo(i)
+      ns.Print(("#%d from %s: %s  money %s"):format(i, tostring(sender), tostring(subject), ns.Money(money or 0)))
+      if GetInboxInvoiceInfo then
+        local v = { GetInboxInvoiceInfo(i) }
+        if v[1] then
+          ns.Print(("   invoice: type=%s item=%s bid=%s buyout=%s deposit=%s cut=%s count=%s"):format(
+            tostring(v[1]), tostring(v[2]), tostring(v[4]), tostring(v[5]), tostring(v[6]), tostring(v[7]), tostring(v[11])))
+          local inv = ns.Ledger.Invoice(i)
+          if inv then ns.Print(("   read as: item id %s, %s units, net %s"):format(tostring(inv.sale), tostring(inv.n), ns.Money(inv.net))) end
+        end
+      end
+      if GetInboxItem then
+        for a = 1, (ATTACHMENTS_MAX_RECEIVE or 16) do
+          local name, itemID, _, count = GetInboxItem(i, a)
+          if name then ns.Print(("   item %d: %s (id %s) x%s"):format(a, name, tostring(itemID), tostring(count))) end
+        end
+      end
+      if i >= 10 then ns.Print("(first 10 mails only)") break end
+    end
+  elseif msg == "debug trade" then
+    -- Everything the trade record knows, and a cross-check against the gold log.
+    local store = ns.Trade.Store()
+    local soldNet, lost, sales, posts, units = 0, 0, 0, 0, 0
+    for _, e in pairs(store.items) do
+      soldNet, lost = soldNet + e.tot.soldNet - e.tot.vendNet, lost + e.tot.lostDep
+      sales, units = sales + #e.sales, units + e.tot.ahN
+      posts = posts + #e.posts
+    end
+    local logged = 0
+    for k, day in pairs(ns.db.ledger.days) do
+      if k >= date("%Y-%m-%d", store.since) and day.ah_sale then logged = logged + day.ah_sale.inc end
+    end
+    ns.Print(("Trade record since %s: %d sales (%d units), AH net %s, deposits lost %s, %d open postings, %d unmatched sale mails.")
+      :format(date("%d %b %H:%M", store.since), sales, units, ns.Money(soldNet), ns.Money(lost), posts, #store.unmatched))
+    ns.Print("Gold log AH sales since then (this character): " .. ns.Money(logged) .. ". Should match AH net above if only this character sells.")
+    for _, u in ipairs(store.unmatched) do ns.Print("  unmatched: " .. tostring(u.name) .. " x" .. tostring(u.n) .. " " .. ns.Money(u.net or 0)) end
   elseif msg:match("^house") then
     -- /cl house          list the houses and which one this character uses
     -- /cl house <id>     use that house (stops automatic detection for this character)

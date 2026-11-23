@@ -11,6 +11,7 @@ L.SOURCE_LABELS = {
   loot = "Mob loot", quest = "Quests",
   vendor_sell = "Vendor sales", vendor_buy = "Vendor purchases", repair = "Repairs",
   ah_sale = "AH sales", ah_refund = "AH outbid refunds", ah_deposit = "AH deposits", ah_buy = "AH purchases",
+  ah_deposit_back = "AH deposits returned",
   mail_in = "Mail received", mail_out = "Mail sent & postage", trade = "Trades",
   training = "Training", flight = "Flights", bank = "Bank slots", other = "Other",
 }
@@ -132,8 +133,10 @@ function L.FirstDay()
   return ns.ShortDate(time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 }))
 end
 
-function L.Flag(source, item, qty)
-  flag = { source = source, item = item, qty = qty, expires = GetTime() + ns.FLAG_TTL }
+-- data: extra details for the trade record (see Trade.lua), e.g. { sale = itemID, n, net, deposit }.
+-- ttl: how long to wait for the money (AH actions can take a few seconds).
+function L.Flag(source, item, qty, data, ttl)
+  flag = { source = source, item = item, qty = qty, data = data, expires = GetTime() + (ttl or ns.FLAG_TTL) }
 end
 
 local function Active(ctx)
@@ -146,7 +149,7 @@ local function Classify(delta)
   flag = nil
   if f and GetTime() < f.expires then
     local sign = FLAG_SIGN[f.source]
-    if not sign or (sign > 0) == (delta > 0) then return f.source, f.item, f.qty end
+    if not sign or (sign > 0) == (delta > 0) then return f.source, f.item, f.qty, f.data end
   end
   if Active("trade") then return "trade" end
   if Active("merchant") then
@@ -192,21 +195,98 @@ Hook("GetQuestReward", function() Flag("quest") end)
 Hook("TakeTaxiNode", function() Flag("flight") end)
 Hook("BuyTrainerService", function() Flag("training") end)
 Hook("PurchaseSlot", function() Flag("bank") end)
-Hook("PostAuction", function() Flag("ah_deposit") end)
-Hook("StartAuction", function() Flag("ah_deposit") end)
+local AH_TTL = 10
+
+-- Classic-style auction house
+Hook("PostAuction", function(_, _, _, stackSize, numStacks)
+  local name = GetAuctionSellItemInfo and GetAuctionSellItemInfo()
+  local id = name and ns.Trade.ItemIDByName(name)
+  Flag("ah_deposit", nil, nil, id and { post = id, n = (stackSize or 1) * (numStacks or 1) }, AH_TTL)
+end)
+Hook("StartAuction", function() Flag("ah_deposit", nil, nil, nil, AH_TTL) end)
 Hook("PlaceAuctionBid", function(listType, index)
-  Flag("ah_buy", GetAuctionItemLink and GetAuctionItemLink(listType, index))
+  Flag("ah_buy", GetAuctionItemLink and GetAuctionItemLink(listType, index), nil, nil, AH_TTL)
 end)
 
+-- Modern auction house (WoW: Forever runs the modern client)
+if C_AuctionHouse then
+  local function ItemIDAt(location)
+    return location and C_Item and C_Item.GetItemID and C_Item.GetItemID(location)
+  end
+  local function OnPost(location, _, quantity)
+    local id = ItemIDAt(location)
+    Flag("ah_deposit", nil, nil, id and { post = id, n = quantity or 1 }, AH_TTL)
+  end
+  local lastKey  -- the item whose auctions you're looking at (for PlaceBid)
+  local commodity
+  local function HookAH(name, fn)
+    if type(C_AuctionHouse[name]) == "function" then hooksecurefunc(C_AuctionHouse, name, fn) end
+  end
+  HookAH("PostItem", OnPost)
+  HookAH("PostCommodity", OnPost)
+  HookAH("SendSearchQuery", function(itemKey) lastKey = itemKey end)
+  HookAH("StartCommoditiesPurchase", function(itemID, quantity) commodity = { id = itemID, n = quantity } end)
+  HookAH("ConfirmCommoditiesPurchase", function(itemID, quantity)
+    local n = quantity or (commodity and commodity.id == itemID and commodity.n) or nil
+    Flag("ah_buy", nil, n, { buy = itemID, n = n }, AH_TTL)
+  end)
+  HookAH("PlaceBid", function(auctionID)
+    local id, n = lastKey and lastKey.itemID, nil
+    if lastKey and C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetItemSearchResultInfo then
+      for i = 1, C_AuctionHouse.GetNumItemSearchResults(lastKey) or 0 do
+        local r = C_AuctionHouse.GetItemSearchResultInfo(lastKey, i)
+        if r and r.auctionID == auctionID then n = r.quantity; break end
+      end
+    end
+    Flag("ah_buy", nil, n, id and { buy = id, n = n or 1 }, AH_TTL)
+  end)
+end
+
+-- Mail: AH sale money (with the sale details), expired/cancelled auctions, other mail.
+local returnPatterns = {}
+for _, g in ipairs({ "AUCTION_EXPIRED_MAIL_SUBJECT", "AUCTION_REMOVED_MAIL_SUBJECT" }) do
+  if type(_G[g]) == "string" then returnPatterns[#returnPatterns + 1] = ns.ToPattern(_G[g]) end
+end
+local function IsReturnedAuction(subject)
+  if not subject then return false end
+  for _, pat in ipairs(returnPatterns) do if subject:match(pat) then return true end end
+  return false
+end
+
+-- Sale details from an AH sale mail, or nil.
+-- GetInboxInvoiceInfo: type, item, buyer, bid, buyout, deposit, consignment (the AH cut), ..., count
+function L.Invoice(index)
+  if not GetInboxInvoiceInfo then return nil end
+  local invoiceType, itemName, _, bid, _, deposit, consignment, _, _, _, count = GetInboxInvoiceInfo(index)
+  if invoiceType ~= "seller" then return nil end
+  return { name = itemName, sale = ns.Trade.ItemIDByName(itemName), n = count,
+    net = (bid or 0) - (consignment or 0), deposit = deposit or 0 }
+end
+
+local lastReturn = {}  -- index -> time, so one click isn't counted twice
+local function OnMailItems(index, attachment)
+  if not (GetInboxHeaderInfo and GetInboxItem) then return end
+  local subject = select(4, GetInboxHeaderInfo(index))
+  if not IsReturnedAuction(subject) then return end
+  local key = index .. ":" .. tostring(attachment) .. ":" .. subject
+  if lastReturn[key] and GetTime() - lastReturn[key] < 5 then return end
+  lastReturn[key] = GetTime()
+  local first, last = attachment or 1, attachment or (ATTACHMENTS_MAX_RECEIVE or 16)
+  for a = first, last do
+    local name, itemID, _, count = GetInboxItem(index, a)
+    if name then ns.Trade.Returned(itemID or ns.Trade.ItemIDByName(name), count or 1) end
+  end
+end
+
 local function OnMailTake(index)
-  local invoiceType, itemName = nil, nil
-  if GetInboxInvoiceInfo then invoiceType, itemName = GetInboxInvoiceInfo(index) end
-  if invoiceType == "seller" then Flag("ah_sale", itemName); return end
+  local inv = L.Invoice(index)
+  if inv then Flag("ah_sale", inv.name, inv.n, inv); return end
   local sender = GetInboxHeaderInfo and select(3, GetInboxHeaderInfo(index))
   if sender and sender:find("Auction", 1, true) then Flag("ah_refund") else Flag("mail_in") end
 end
 Hook("TakeInboxMoney", OnMailTake)
-Hook("AutoLootMailItem", OnMailTake)
+Hook("AutoLootMailItem", function(index) OnMailItems(index); OnMailTake(index) end)
+Hook("TakeInboxItem", function(index, attachment) OnMailItems(index, attachment) end)
 
 ---------------------------------------------------------------------------
 -- Events
@@ -259,8 +339,23 @@ ns.On("PLAYER_MONEY", function()
     ns.Gathering.AddMoney(delta)
     L.Record(activity, delta)
   else
-    local source, item, qty = Classify(delta)
-    L.Record(source, delta, item, qty)
+    local source, item, qty, data = Classify(delta)
+    if source == "ah_sale" and data then
+      -- Sale money = sale price - AH cut + your deposit back. Only the first part is income.
+      local back = math.min(math.max(data.deposit or 0, 0), delta)
+      local net = delta - back
+      L.Record("ah_sale", net, item, qty)
+      if back > 0 then L.Record("ah_deposit_back", back) end
+      if data.sale then ns.Trade.Sale(data.sale, data.n, net) else ns.Trade.Unmatched(data.name, data.n, net) end
+    else
+      L.Record(source, delta, item, qty)
+      if data and source == "ah_deposit" and data.post then ns.Trade.Posted(data.post, data.n, -delta) end
+      if data and source == "ah_buy" and data.buy then ns.Trade.Bought(data.buy, data.n, -delta) end
+      if source == "vendor_sell" and item then
+        local id = tonumber(tostring(item):match("item:(%d+)"))
+        if id then ns.Trade.Vendored(id, qty or 1, delta) end
+      end
+    end
   end
   ns.Refresh()
 end)
