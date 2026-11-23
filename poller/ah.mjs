@@ -202,7 +202,7 @@ for (const house of houses) {
   const prevSnap = await loadSnapshot(house.id);
   const fresh = !prevSnap || data.snapshot.t > prevSnap.t;
   const sold = prevSnap && fresh ? diffSnapshots(prevSnap, data.snapshot) : null;
-  recordHour(history, data.snapshot.t, sold, data.items);
+  recordHour(history, data.snapshot.t, sold, data.items, { span: sold ? (data.snapshot.t - prevSnap.t) / 3600e3 : 0 });
   await writeFile(join(OUT_DIR, "history", `${house.id}.snap.json.gz`), gzipSync(JSON.stringify(fresh ? data.snapshot : prevSnap)));
   await writeFile(join(OUT_DIR, "history", `${house.id}.json.gz`), gzipSync(JSON.stringify(history)));
 

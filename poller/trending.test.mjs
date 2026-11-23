@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { diffSnapshots, recordHour, TIME_LEFT } from "./sales.mjs";
-import { trendingLists, encodeEntry } from "./trending.mjs";
+import { trendingLists, encodeEntry, itemStats } from "./trending.mjs";
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
 const NOW = Date.parse("2026-11-30T12:00:00Z");
@@ -163,4 +163,41 @@ test("MEDIUM listings that vanish within the hour count as expired", () => {
   const d = diffSnapshots(prev, { t: HOUR, l: [] }).get(100);
   assert.equal(d.units, 0);
   assert.equal(d.expired, 20);
+});
+
+// A steady 24/day item: baseline days of 24, then a 12-hour outage, then 12 normal hours.
+function afterOutage({ withSpan }) {
+  const h = { hours: [], sales: {}, salesHours: {} };
+  for (let d = 7; d >= 2; d--) {
+    const key = new Date(NOW - d * DAY).toISOString().slice(0, 10);
+    h.sales[key] = { 2589: [24, 12, 24 * 500] };
+    h.salesHours[key] = 24;
+  }
+  const rec = (t, units, span) => ({ t, s: { 2589: [units, units, units * 500] }, q: { 2589: [100, 500] }, diff: true, ...(withSpan ? { h: span } : {}) });
+  h.hours.push(rec(NOW - 12 * HOUR, 12, 12)); // one diff over the 12 hours of outage
+  for (let i = 11; i >= 0; i--) h.hours.push(rec(NOW - i * HOUR, 1, 1));
+  return h;
+}
+
+test("A4: after an outage, sales are scaled by the hours the diffs cover, not by how many diffs there are", () => {
+  const { stats, coverage } = itemStats(afterOutage({ withSpan: true }), { 2589: { market: 500, qty: 100 } }, NOW);
+  assert.equal(coverage, 24);
+  const s = stats.get("2589");
+  assert.equal(s.sold24, 24);
+  assert.ok(s.sold24 / s.normal < 1.1, `ratio ${s.sold24 / s.normal}`);
+});
+
+test("A4: hour records without a span (written before spans were kept) count as 1 hour", () => {
+  const { coverage } = itemStats(afterOutage({ withSpan: false }), { 2589: { market: 500, qty: 100 } }, NOW);
+  assert.equal(coverage, 13);
+});
+
+test("A4: recordHour keeps the span of each diff and adds it to the day's hours covered", () => {
+  const h = {};
+  const sold = new Map([[5, { units: 12, auctions: 3, gold: 600 }]]);
+  recordHour(h, NOW, sold, { 5: { qty: 10, market: 50 } }, { span: 12 });
+  recordHour(h, NOW + HOUR, sold, { 5: { qty: 10, market: 50 } }, { span: 1 });
+  recordHour(h, NOW + 2 * HOUR, null, { 5: { qty: 10, market: 50 } });
+  assert.deepEqual(h.hours.map((x) => x.h), [12, 1, undefined]);
+  assert.equal(h.salesHours[new Date(NOW).toISOString().slice(0, 10)], 13);
 });

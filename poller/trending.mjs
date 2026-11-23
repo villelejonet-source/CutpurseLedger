@@ -12,7 +12,7 @@ const HOUR = 3600e3;
 const GOLD = 10000; // copper
 
 export const TREND = {
-  minHoursOfData: 12,        // need at least 12 hourly comparisons in the last 24 hours
+  minHoursOfData: 12,        // need at least 12 hours covered by comparisons in the last 24 hours
   minBaselineDays: 2,        // ...and 2 complete earlier days to know what "normal" is
   completeDayHours: 18,      // a day counts as complete with 18+ hours of data
   baselineDays: 7,           // "normal" = recent-weighted average of the last 7 complete days
@@ -40,7 +40,8 @@ function dayKey(t) { return new Date(t).toISOString().slice(0, 10); }
 export function itemStats(history, items, now, S = TREND) {
   const hours = (history.hours ?? []).filter((h) => h.t > now - 24 * HOUR - 5 * 60e3);
   const diffHours = hours.filter((h) => h.diff);
-  const coverage = diffHours.length;
+  // Hours of trading the diffs cover (a diff after an outage spans several hours).
+  const coverage = Math.round(diffHours.reduce((a, h) => a + (h.h ?? 1), 0) * 100) / 100;
   const oldest = hours[0];
 
   // Complete days before the 24h window, newest last
@@ -63,7 +64,7 @@ export function itemStats(history, items, now, S = TREND) {
       active += 1;
       maxHour = Math.max(maxHour, v[0]);
     }
-    // Scale to a full day if a few hours are missing
+    // Scale to a full day by the hours the diffs cover
     const scale = coverage > 0 ? 24 / coverage : 0;
     const normalSeries = days.map((d) => history.sales[d]?.[id]?.[0] ?? 0);
     const normal = days.length >= S.minBaselineDays ? baseline(normalSeries, 3) : null;
