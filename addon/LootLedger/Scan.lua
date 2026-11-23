@@ -145,10 +145,14 @@ ns.On("AUCTION_HOUSE_CLOSED", function()
 end)
 
 -- A "Scan" button on the auction house window (modern AH frame), made once.
+-- The window is load-on-demand: on the first visit it may not exist yet when
+-- AUCTION_HOUSE_SHOW reaches us, so we also try when Blizzard's AH UI finishes
+-- loading, and once more on the next frame.
 local button
-ns.On("AUCTION_HOUSE_SHOW", function()
+local function AddButton()
   if button or not S.Supported() or not AuctionHouseFrame then return end
   button = CreateFrame("Button", nil, AuctionHouseFrame, "UIPanelButtonTemplate")
+  S.button = button
   button:SetSize(120, 22)
   button:SetPoint("TOPRIGHT", AuctionHouseFrame, "TOPRIGHT", -60, -1)
   button:SetText("Cutpurse scan")
@@ -162,4 +166,12 @@ ns.On("AUCTION_HOUSE_SHOW", function()
     GameTooltip:Show()
   end)
   button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+ns.On("AUCTION_HOUSE_SHOW", function()
+  AddButton()
+  if not button then C_Timer.After(0, AddButton) end
+end)
+ns.On("ADDON_LOADED", function(name)
+  if name == "Blizzard_AuctionHouseUI" then AddButton() end
 end)
