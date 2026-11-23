@@ -131,7 +131,7 @@ local function Render(view)
   end
   ScanRows(rows, id)
 
-  local badgeColors = { SELL = C.green, LIST = C.gold, HOLD = C.blue, CHECK = { 1, 0.6, 0.2, 1 },
+  local badgeColors = { SELL = C.green, LIST = C.gold, HOLD = C.blue, CRASH = C.red, CHECK = { 1, 0.6, 0.2, 1 },
     VENDOR = { 0.75, 0.75, 0.75, 1 }, KEEP = C.muted }
   rows[#rows + 1] = { kind = "row", badge = { text = ns.Advisor.ACTIONS[d.action].label, color = badgeColors[d.action] },
     label = d.reason, value = d.unit and d.unit > 0 and (ns.Money(d.unit) .. T.Color(" each", C.muted)) or "" }
@@ -254,6 +254,8 @@ ns.RegisterTab({
   key = "market", label = "Market", order = 4, subtabs = subtabs,
   choices = function(sub)
     if sub == "item" then return ns.ui.marketItem and VIEWS or nil, "range" end
+    local t = P.Trending()
+    if not (t and t.ready) then return nil end  -- nothing to filter yet
     return ns.Views.trendingFilters, "filter"
   end,
   render = function(sub, period, choice)

@@ -118,9 +118,53 @@ local content = CreateFrame("Frame", nil, scroll)
 content:SetSize(BODY_W, 10)
 scroll:SetScrollChild(content)
 scroll:EnableMouseWheel(true)
+local function MaxScroll() return math.max(0, content:GetHeight() - scroll:GetHeight()) end
+
+-- A thin scrollbar in the right margin, only when there is more to see. Drag the
+-- thumb or use the mouse wheel.
+local track = CreateFrame("Frame", nil, win)
+track:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 6, 0)
+track:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 6, 0)
+track:SetWidth(4)
+T.Fill(track, "BACKGROUND", C.line):SetAllPoints()
+track:Hide()
+local thumb = CreateFrame("Frame", nil, track)
+thumb:SetWidth(4)
+local thumbTex = T.Fill(thumb, "ARTWORK", C.muted)
+thumbTex:SetAllPoints()
+thumb:EnableMouse(true)
+
+local function UpdateScrollbar()
+  local view, total = scroll:GetHeight(), content:GetHeight()
+  if not (view and view > 0) or total <= view + 1 then track:Hide(); return end
+  track:Show()
+  local h = math.max(24, view * view / total)
+  thumb:SetHeight(h)
+  thumb:ClearAllPoints()
+  thumb:SetPoint("TOP", track, "TOP", 0, -(scroll:GetVerticalScroll() / MaxScroll()) * (view - h))
+end
+
+thumb:SetScript("OnEnter", function() T.SetColor(thumbTex, C.text) end)
+thumb:SetScript("OnLeave", function() T.SetColor(thumbTex, C.muted) end)
+thumb:SetScript("OnMouseDown", function(self)
+  local _, y = GetCursorPosition()
+  self.dragY, self.dragScroll = y / self:GetEffectiveScale(), scroll:GetVerticalScroll()
+end)
+thumb:SetScript("OnMouseUp", function(self) self.dragY = nil end)
+thumb:SetScript("OnUpdate", function(self)
+  if not self.dragY then return end
+  if not IsMouseButtonDown("LeftButton") then self.dragY = nil; return end
+  local range = scroll:GetHeight() - self:GetHeight()
+  if range <= 0 then return end
+  local _, y = GetCursorPosition()
+  local pos = self.dragScroll + (self.dragY - y / self:GetEffectiveScale()) / range * MaxScroll()
+  scroll:SetVerticalScroll(math.min(MaxScroll(), math.max(0, pos)))
+  UpdateScrollbar()
+end)
+
 scroll:SetScript("OnMouseWheel", function(self, delta)
-  local max = math.max(0, content:GetHeight() - self:GetHeight())
-  self:SetVerticalScroll(math.min(max, math.max(0, self:GetVerticalScroll() - delta * 40)))
+  self:SetVerticalScroll(math.min(MaxScroll(), math.max(0, self:GetVerticalScroll() - delta * 40)))
+  UpdateScrollbar()
 end)
 
 ---------------------------------------------------------------------------
@@ -240,6 +284,11 @@ function MAKE.row()
   f.value = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   f.value:SetPoint("RIGHT", -6, 0)
   f.value:SetJustifyH("RIGHT")
+  -- The grey note (a reason, a time) goes on a second line when it doesn't fit.
+  f.note = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  f.note:SetJustifyH("LEFT")
+  if f.note.SetWordWrap then f.note:SetWordWrap(false) end
+  SetTextColor(f.note, C.muted)
   f.hover = T.Fill(f, "BACKGROUND", C.line, 1)
   f.hover:SetAllPoints()
   f.hover:Hide()
@@ -259,6 +308,7 @@ function MAKE.row()
   return f
 end
 HEIGHTS.row = 24
+HEIGHTS.row2 = 38  -- a row whose note needs its own line
 local function DrawRow(f, r, index)
   f.hover:Hide()  -- rows are reused: a redraw (scroll, refresh) mustn't keep the old highlight
   f.stripe:SetShown(index % 2 == 1)
@@ -286,13 +336,27 @@ local function DrawRow(f, r, index)
   else
     f.badge:Hide()
   end
-  f.label:ClearAllPoints()
-  f.label:SetPoint("LEFT", x, 0)
-  f.label:SetPoint("RIGHT", f.value, "LEFT", -10, 0)
-  local label = r.label or ""
-  if r.note then label = label .. "  " .. T.Color(r.note, C.muted) end
-  f.label:SetText(label)
   f.value:SetText(r.value or "")
+  local avail = BODY_W - x - 6 - f.value:GetStringWidth() - 10
+  local label = r.label or ""
+  f.label:SetText(r.note and (label .. "  " .. T.Color(r.note, C.muted)) or label)
+  local width = f.label.GetUnboundedStringWidth and f.label:GetUnboundedStringWidth() or f.label:GetStringWidth()
+  local twoLines = r.note ~= nil and width > avail
+  f.label:ClearAllPoints()
+  f.label:SetWidth(avail)
+  if twoLines then
+    f.label:SetText(label)
+    f.label:SetPoint("TOPLEFT", x, -5)
+    f.note:ClearAllPoints()
+    f.note:SetPoint("TOPLEFT", x, -21)
+    f.note:SetWidth(avail)
+    f.note:SetText(r.note)
+    f.note:Show()
+    return HEIGHTS.row2
+  end
+  f.label:SetPoint("LEFT", x, 0)
+  f.note:Hide()
+  return HEIGHTS.row
 end
 
 function MAKE.note()
@@ -571,7 +635,7 @@ local function Draw(rows)
     if r.kind == "title" then DrawTitle(f, r)
     elseif r.kind == "tiles" then DrawTiles(f, r)
     elseif r.kind == "section" then DrawSection(f, r); stripe = 0
-    elseif r.kind == "row" then stripe = stripe + 1; DrawRow(f, r, stripe)
+    elseif r.kind == "row" then stripe = stripe + 1; h = DrawRow(f, r, stripe)
     elseif r.kind == "note" then h = DrawNote(f, r)
     elseif r.kind == "cards" then h = DrawCards(f, r)
     elseif r.kind == "chart" then h = r.height or 150; DrawChart(f, r, h)
@@ -583,21 +647,36 @@ local function Draw(rows)
     y = y + h
   end
   content:SetHeight(math.max(y, 10))
+  UpdateScrollbar()
 end
 
 ---------------------------------------------------------------------------
 -- Navigation: one row of main tabs, then (optionally) one row of subtabs with
 -- a small dropdown at its right end (the period, a chart range or a filter).
 ---------------------------------------------------------------------------
+-- Main tabs share the width equally. Subtab chips get the width their label needs
+-- (plus padding), and whatever is left is shared evenly, so long labels like
+-- "Price climbing" or "Pickpocket" aren't squeezed into the same box as "Item".
+local CHIP_PAD = 14
 local function Row(entries, kind, height, width, onClick)
   local gap, n = kind == "tab" and 0 or 4, #entries
-  local w = (width - gap * (n - 1)) / n
-  local buttons = {}
+  local free = width - gap * (n - 1)
+  local list, buttons, need = {}, {}, 0
   for i, e in ipairs(entries) do
     local b = T.Button(win, e.label, kind, function() onClick(e.key) end)
+    list[i], buttons[e.key] = b, b
+    b.need = kind == "tab" and 0 or (b.text:GetStringWidth() + CHIP_PAD)
+    need = need + b.need
+  end
+  local x = PAD
+  for _, b in ipairs(list) do
+    local w
+    if kind == "tab" then w = free / n
+    elseif need <= free then w = b.need + (free - need) / n
+    else w = b.need * free / need end  -- too long even at their own width: shrink all alike
     b:SetSize(w, height)
-    b.x = PAD + (i - 1) * (w + gap)
-    buttons[e.key] = b
+    b.x = x
+    x = x + w + gap
   end
   return buttons
 end

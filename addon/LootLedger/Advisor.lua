@@ -31,6 +31,7 @@ A.ACTIONS = {
   SELL   = { label = "Sell now",    color = "ff4cff4c", order = 1 },
   LIST   = { label = "List",        color = "ffffd100", order = 2 },
   HOLD   = { label = "Hold",        color = "ff66b3ff", order = 3 },
+  CRASH  = { label = "Crashed",     color = "ffff6b6b", order = 3.5 },  -- dropped hard, cause unknown: look first
   CHECK  = { label = "No AH price", color = "ffff9933", order = 4 },
   VENDOR = { label = "Vendor",      color = "ffbbbbbb", order = 5 },
   KEEP   = { label = "Keep",        color = "ff777777", order = 6 },
@@ -160,7 +161,7 @@ function A.Decide(id)
     d.action, d.reason = "HOLD", Pct(vs) .. " vs normal, demand steady: a dip, wait"
   elseif below and crash then
     -- Dropped hard just now and no sales data says why: a dip or a collapse?
-    d.action = "LIST"
+    d.action = "CRASH"
     d.reason = "dropped " .. (Pct(-drop):gsub("^%+", "")) .. " since yesterday, can't tell a dip from demand gone: check the AH before holding"
   elseif below then
     d.action, d.reason = "HOLD", Pct(vs) .. " vs normal, wait"

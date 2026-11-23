@@ -51,7 +51,7 @@ function P.Trending()
   local t = h and h.trending
   if not t then return nil end
   if trendCache and trendCache.src == t then return trendCache end
-  local out = { src = t, ready = t.ready, hoursOfData = t.hoursOfData or 0, baselineDays = t.baselineDays or 0, lists = {}, byItem = {} }
+  local out = { src = t, ready = t.ready, hoursOfData = t.hoursOfData or 0, baselineDays = t.baselineDays or 0, readyAt = t.readyAt, lists = {}, byItem = {} }
   for _, key in ipairs(P.TREND_LISTS) do
     local list = {}
     for _, s in ipairs(t[key] or {}) do
