@@ -173,3 +173,35 @@ test("B5: choosing a quest reward alone sets no flag (QUEST_TURNED_IN does)", ()
        GAIN(-500)`);
   assert.deepEqual(log(), ["other -500"]);
 });
+
+// Account data from before this character logs in: a Horde and an Alliance character
+// that each gathered 100 Light Leather, and one saved before factions were kept.
+const SAVED_CHARS = `
+  LootLedgerAccountDB = { chars = {
+    ["-Horde"]    = { name = "Horde", realm = "", faction = "Horde", acts = { skinning = { items = { [2318] = 100 } } } },
+    ["-Alliance"] = { name = "Alliance", realm = "", faction = "Alliance", acts = { skinning = { items = { [2318] = 100 } } } },
+  } }
+`;
+const OLD_CHAR = `LootLedgerAccountDB.chars["-Old"] = { name = "Old", realm = "", acts = { skinning = { items = { [2318] = 100 } } } }`;
+
+test("B6: profession credit only counts characters of the same faction", () => {
+  const { run, get } = luaVM({ before: SAVED_CHARS + `FACTION = "Alliance"; UnitName = function() return "Alliance" end` });
+  assert.equal(get(`ns.db.faction`), "Alliance");
+  run(`ns.Trade.Sale(2318, 100, 100 * 600)`);
+  assert.equal(get(`ns.Trade.Credit(2318, 100, 0).sold`), 100);
+});
+
+test("B6: characters saved before factions were kept still count, until they log in", () => {
+  const { run, get } = luaVM({ before: SAVED_CHARS + OLD_CHAR + `FACTION = "Alliance"; UnitName = function() return "Alliance" end` });
+  run(`ns.Trade.Sale(2318, 100, 100 * 600)`);
+  assert.equal(get(`ns.Trade.Credit(2318, 100, 0).sold`), 50); // Alliance + Old gathered 200
+});
+
+test("B6: inventory lists only characters sharing the auction house", () => {
+  const { get } = luaVM({
+    files: ["Core.lua", "Gathering.lua", "Trade.lua", "Ledger.lua", "Inventory.lua"],
+    before: SAVED_CHARS + OLD_CHAR + `FACTION = "Alliance"; UnitName = function() return "Alliance" end`,
+  });
+  const names = get(`(function() local t = {} for _, ch in ipairs(ns.Inventory.RealmChars()) do t[#t + 1] = ch.name end table.sort(t) return table.concat(t, ",") end)()`);
+  assert.equal(names, "Alliance,Old");
+});

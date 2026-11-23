@@ -286,6 +286,7 @@ ns.On("PLAYER_LOGIN", function()
   local ch = acc.chars[key]
   if not ch then ch = {}; acc.chars[key] = ch end
   ch.name, ch.realm, ch.class = name, realm, select(2, UnitClass("player"))
+  ch.faction = UnitFactionGroup and UnitFactionGroup("player") or ch.faction
   -- Forever returns "" from GetRealmName; keep the key stable, but find a name to show.
   local shown = realm ~= "" and realm or (GetNormalizedRealmName and GetNormalizedRealmName()) or ""
   ch.realmLabel = shown ~= "" and shown or nil

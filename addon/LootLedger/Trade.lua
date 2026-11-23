@@ -233,11 +233,19 @@ end
 ---------------------------------------------------------------------------
 -- Which profession gets the credit for a sale
 ---------------------------------------------------------------------------
--- How much of an item was gathered, by everyone on this realm, all time.
+-- Does a saved character share this character's auction house (same realm and
+-- faction)? Characters saved before factions were kept (no ch.faction) count as
+-- matching until they next log in.
+function Tr.SameAH(ch)
+  if ch.realm ~= ns.db.realm then return false end
+  return not ch.faction or not ns.db.faction or ch.faction == ns.db.faction
+end
+
+-- How much of an item was gathered, by everyone on this realm and faction, all time.
 local function GatheredTotal(id)
   local total = 0
   for _, ch in pairs(ns.acc.chars or {}) do
-    if ch.realm == ns.db.realm then
+    if Tr.SameAH(ch) then
       for _, b in pairs(ch.acts or {}) do total = total + (b.items and b.items[id] or 0) end
     end
   end
