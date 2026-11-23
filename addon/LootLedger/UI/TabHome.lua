@@ -66,6 +66,27 @@ local function Render(_, period)
     { kind = "cards", cards = Cards() },
   }
 
+  -- Net worth: right now, all characters (not affected by the period)
+  local w = ns.Advisor.NetWorth()
+  rows[#rows + 1] = { kind = "section", text = "Net worth · all characters",
+    right = T.Color("items at current prices", C.muted) }
+  rows[#rows + 1] = { kind = "space", h = 6 }
+  rows[#rows + 1] = { kind = "tiles", tiles = {
+    { label = "Gold", value = ns.Money(w.gold), color = C.gold },
+    { label = "Items", value = ns.Money(w.items), color = C.blue },
+    { label = "Net worth", value = ns.Money(w.total), color = C.green },
+  } }
+  if #w.chars > 1 then
+    for _, c in ipairs(w.chars) do
+      rows[#rows + 1] = { kind = "row", icon = T.GOLD_ICON, label = c.name,
+        note = (c.faction and (c.faction .. " · ") or "") .. ns.Money(c.gold) .. " gold",
+        value = ns.Money(c.total), bar = w.chars[1].total > 0 and c.total / w.chars[1].total or 0, barColor = C.gold }
+    end
+  end
+  if w.unpriced > 0 then
+    rows[#rows + 1] = { kind = "note", text = w.unpriced .. " item stacks have no AH price and count at their vendor price. Bank and mail are as of your last visit." }
+  end
+
   local L = ns.Ledger
   local inc, exp, bySrc = L.Sum(period)
   local title = ns.PeriodTitle(period, L.FirstDay())
