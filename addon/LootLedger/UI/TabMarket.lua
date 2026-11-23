@@ -81,6 +81,22 @@ local function Empty()
   return rows
 end
 
+-- Market price from your own scans, last scan of each day (newest first).
+local function ScanRows(rows, id)
+  local days = ns.acc.scanDays and ns.acc.scanDays[P.House() or 0]
+  if not days then return end
+  local list = {}
+  for day, items in pairs(days) do
+    if items[id] then list[#list + 1] = { day = day, v = items[id] } end
+  end
+  if #list < 2 then return end  -- one day is already the price above
+  table.sort(list, function(a, b) return a.day > b.day end)
+  rows[#rows + 1] = { kind = "section", text = "Your scans", right = T.Color("market price, last scan of the day", C.muted) }
+  for i = 1, math.min(7, #list) do
+    rows[#rows + 1] = { kind = "row", label = list[i].day, value = ns.Money(list[i].v) }
+  end
+end
+
 local function Render(view)
   local id = ns.ui.marketItem
   if not id then return Empty() end
@@ -108,6 +124,12 @@ local function Render(view)
     { label = "Trend", value = trend and T.Color(Pct(trend, true) .. " / day", trend >= 0 and C.green or C.red) or "-",
       color = trend and (trend >= 0 and C.green or C.red) or C.muted },
   } }
+
+  if p.scanned then
+    rows[#rows + 1] = { kind = "note", text = "AH price from your scan " .. ns.FormatDuration(time() - p.scanned)
+      .. " ago (" .. (p.auctions or 0) .. " listed). The chart and averages come from the hourly feed." }
+  end
+  ScanRows(rows, id)
 
   local badgeColors = { SELL = C.green, LIST = C.gold, HOLD = C.blue, CHECK = { 1, 0.6, 0.2, 1 },
     VENDOR = { 0.75, 0.75, 0.75, 1 }, KEEP = C.muted }

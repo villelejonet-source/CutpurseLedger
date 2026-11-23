@@ -139,6 +139,7 @@ local function FromFeed(itemID, c, houseID)
   if not market then return false end  -- a line in a format we don't know
   c.market, c.recent = tonumber(market), tonumber(market)
   c.min, c.auctions = tonumber(min), tonumber(qty)
+  c.updated = house.updated
   c.avg7 = tonumber(a7) > 0 and tonumber(a7) or nil
   c.historical = tonumber(a30) > 0 and tonumber(a30) or nil
   return true
@@ -310,7 +311,8 @@ end
 ---------------------------------------------------------------------------
 -- Everything known about an item's price. Fields can be nil.
 -- { vendor, market, min, recent, historical, avg7, auctions, soldPerDay,
---   saleRate, region, hasAH = bool, source = "blizzard"|"tsm"|nil }
+--   saleRate, region, hasAH = bool, source = "blizzard"|"tsm"|"scan"|nil,
+--   updated = feed time, scanned = time of the scan the current numbers come from }
 -- houseID: read another house's prices (e.g. for an alt on the other faction).
 function P.Get(itemID, houseID)
   if not itemID then return { vendor = 0, hasAH = false } end
@@ -324,6 +326,17 @@ function P.Get(itemID, houseID)
     c.source = "blizzard"
   elseif FromTSM(itemID, c) then
     c.source = "tsm"
+  end
+  -- A scan of this house newer than the feed: market, lowest price and quantity
+  -- as listed right now. Items missing from the scan keep the feed's numbers.
+  local scan = ns.Scan and ns.Scan.Latest(houseID or P.House() or 0)
+  if scan and scan.t > (c.updated or 0) then
+    local market, min, qty = (scan.items[itemID] or ""):match("^(%d+),(%d+),(%d+)$")
+    if market then
+      c.market, c.recent, c.min, c.auctions = tonumber(market), tonumber(market), tonumber(min), tonumber(qty)
+      c.scanned = scan.t
+      c.source = c.source or "scan"
+    end
   end
   local feed = Feed()
   if feed and feed.spd and feed.spd[itemID] then c.soldPerDay = c.soldPerDay or feed.spd[itemID] end
