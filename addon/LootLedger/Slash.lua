@@ -121,6 +121,18 @@ SlashCmdList.LOOTLEDGER = function(msg)
       end
       DEFAULT_CHAT_FRAME:AddMessage("  /cl house <number> to set it yourself, /cl house auto to detect it at the AH.")
     end
+  elseif msg == "worth" or msg == "networth" then
+    -- Gold on every character plus their items at current prices.
+    local w = ns.Advisor.NetWorth()
+    ns.Print(("Net worth %s: %s gold + %s in items (bags, bank, mail as of your last visit)."):format(
+      ns.Money(w.total), ns.Money(w.gold), ns.Money(w.items)))
+    for _, c in ipairs(w.chars) do
+      DEFAULT_CHAT_FRAME:AddMessage(("  %s%s: %s  (gold %s, items %s)"):format(c.name,
+        c.faction and (" (" .. c.faction .. ")") or "", ns.Money(c.total), ns.Money(c.gold), ns.Money(c.items)))
+    end
+    if w.unpriced > 0 then
+      DEFAULT_CHAT_FRAME:AddMessage(("  %d item stacks have no AH price and count at their vendor price."):format(w.unpriced))
+    end
   elseif msg == "box" then
     ns.ToggleBox()
   elseif msg == "session" then
@@ -134,6 +146,6 @@ SlashCmdList.LOOTLEDGER = function(msg)
     ns.Refresh()
     ns.Print("Everything on this character reset.")
   else
-    ns.Print("/cl  open · /cl overview | log | inventory | sell | gathering | skinning | pickpocket | mining | herbalism · /cl trending · /cl market [item] · /cl house · /cl box · /cl session · /cl reset")
+    ns.Print("/cl  open · /cl overview | log | inventory | sell | gathering | skinning | pickpocket | mining | herbalism · /cl trending · /cl market [item] · /cl worth · /cl house · /cl box · /cl session · /cl reset")
   end
 end

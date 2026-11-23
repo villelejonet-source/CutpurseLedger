@@ -102,6 +102,18 @@ function P.House()
   return guess, false, "guess"
 end
 
+-- The house a saved character reads prices from: this character's own, else the
+-- one it last used (detected or set), else the biggest house of its faction.
+function P.HouseFor(ch)
+  if ch == ns.db then return (P.House()) end
+  local houses = FeedHouses(Feed())
+  if ch.house and houses[ch.house] then return ch.house end
+  for _, h in ipairs(P.Houses()) do
+    if ch.faction and houses[h.id].faction == ch.faction then return h.id end
+  end
+  return (P.House())
+end
+
 -- source: "manual" (/cl house) or "detected" (matched at the AH)
 function P.SetHouse(id, source)
   ns.db.house = id
@@ -117,9 +129,9 @@ ns.OnInit(function()
   end
 end)
 
-local function FromFeed(itemID, c)
+local function FromFeed(itemID, c, houseID)
   local feed = Feed()
-  local houseID = P.House()
+  houseID = houseID or P.House()
   local house = houseID and FeedHouses(feed)[houseID]
   local s = house and house.items and house.items[itemID]
   if type(s) ~= "string" then return false end
@@ -299,13 +311,16 @@ end
 -- Everything known about an item's price. Fields can be nil.
 -- { vendor, market, min, recent, historical, avg7, auctions, soldPerDay,
 --   saleRate, region, hasAH = bool, source = "blizzard"|"tsm"|nil }
-function P.Get(itemID)
+-- houseID: read another house's prices (e.g. for an alt on the other faction).
+function P.Get(itemID, houseID)
   if not itemID then return { vendor = 0, hasAH = false } end
-  local c = cache[itemID]
+  if houseID == P.House() then houseID = nil end
+  local key = houseID and (houseID .. ":" .. itemID) or itemID
+  local c = cache[key]
   if c and GetTime() - c.at < CACHE_SECONDS then return c end
 
   c = { at = GetTime(), vendor = ns.SellPrice(itemID) }
-  if FromFeed(itemID, c) then
+  if FromFeed(itemID, c, houseID) then
     c.source = "blizzard"
   elseif FromTSM(itemID, c) then
     c.source = "tsm"
@@ -313,7 +328,7 @@ function P.Get(itemID)
   local feed = Feed()
   if feed and feed.spd and feed.spd[itemID] then c.soldPerDay = c.soldPerDay or feed.spd[itemID] end
   c.hasAH = (c.market or c.region) ~= nil
-  cache[itemID] = c
+  cache[key] = c
   return c
 end
 

@@ -153,6 +153,46 @@ function A.InventoryPlan()
   return list
 end
 
+---------------------------------------------------------------------------
+-- Net worth: gold on every character of the account, plus what their items
+-- (bags, bank, mail as of the last visit) would bring at current prices.
+---------------------------------------------------------------------------
+-- What one unit would bring you at a house: the AH price after the cut, or the
+-- vendor price if that pays more. Soulbound and junk: vendor price. No AH price
+-- known: vendor price, and `unpriced` is true (it may be worth more).
+function A.UnitWorth(id, house)
+  local p = ns.Prices.Get(id, house)
+  local vendor = p.vendor or 0
+  local item = ns.acc and ns.acc.items and ns.acc.items[id] or {}
+  if item.bound or Quality(id) == 0 then return vendor, false end
+  if not p.hasAH then return vendor, true end
+  return math.max(math.floor(ns.Prices.AHPrice(p) * (1 - A.SETTINGS.ahCut)), vendor), false
+end
+
+-- { gold, items, total, unpriced (item stacks without an AH price),
+--   chars = { { name, label, faction, gold, items, total, house } } (richest first) }
+function A.NetWorth()
+  local out = { gold = 0, items = 0, total = 0, unpriced = 0, chars = {} }
+  for _, ch in pairs(ns.acc.chars or {}) do
+    local gold = ch == ns.db and GetMoney() or (ch.gold or 0)
+    local house = ns.Prices.HouseFor(ch)
+    local items = 0
+    for _, place in ipairs(ns.Inventory.PLACES) do
+      for id, n in pairs(ch.inv and ch.inv[place] or {}) do
+        local unit, unpriced = A.UnitWorth(id, house)
+        items = items + unit * n
+        if unpriced then out.unpriced = out.unpriced + 1 end
+      end
+    end
+    out.chars[#out.chars + 1] = { name = ch.name or "?", label = ch.realmLabel, faction = ch.faction,
+      gold = gold, items = items, total = gold + items, house = house }
+    out.gold, out.items = out.gold + gold, out.items + items
+  end
+  out.total = out.gold + out.items
+  table.sort(out.chars, function(x, y) return x.total > y.total end)
+  return out
+end
+
 function A.Tag(action)
   local a = A.ACTIONS[action]
   return "|c" .. a.color .. a.label .. "|r"
