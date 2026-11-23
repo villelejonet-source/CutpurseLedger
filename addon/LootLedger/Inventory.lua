@@ -61,16 +61,22 @@ local function BagList()
   return list
 end
 
+-- Each container once, and never one the bag scan already counts: on newer
+-- clients the reagent bag sits right after the bags (where bank bags used to
+-- start), and the character bank tabs reuse the old bank bag IDs. Counting
+-- them twice doubled what you own.
 local function BankList()
-  local list = { BANK_CONTAINER or -1 }
+  local list, seen = {}, {}
+  for _, bag in ipairs(BagList()) do seen[bag] = true end
+  local function Add(bag)
+    if bag and not seen[bag] then seen[bag] = true; list[#list + 1] = bag end
+  end
+  Add(BANK_CONTAINER or -1)
   local first = (NUM_BAG_SLOTS or 4) + 1
-  for bag = first, first + (NUM_BANKBAGSLOTS or 7) - 1 do list[#list + 1] = bag end
+  for bag = first, first + (NUM_BANKBAGSLOTS or 7) - 1 do Add(bag) end
   -- Newer clients: character bank tabs
   if Enum and Enum.BagIndex then
-    for i = 1, 6 do
-      local tab = Enum.BagIndex["CharacterBankTab_" .. i]
-      if tab then list[#list + 1] = tab end
-    end
+    for i = 1, 6 do Add(Enum.BagIndex["CharacterBankTab_" .. i]) end
   end
   return list
 end
