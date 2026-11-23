@@ -36,8 +36,10 @@ const step = (name) => steps().find((s) => s.name === name);
 const names = () => steps().map((s) => s.name);
 
 // Run a step's script like GitHub does (bash -eo pipefail), in `cwd`, with extra env.
+// `${{ github.repository }}` becomes "owner/repo"; other expressions become "".
 function runStep(name, cwd, env = {}) {
-  const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step(name).run], {
+  const script = step(name).run.replace(/\$\{\{\s*([^}]*?)\s*\}\}/g, (_, e) => (e === "github.repository" ? "owner/repo" : ""));
+  const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", script], {
     cwd, env: { ...process.env, ...env }, encoding: "utf8",
   });
   return { code: r.status, out: r.stdout + r.stderr };
@@ -83,4 +85,41 @@ test("A3: history is saved right after the fetch, before release and CurseForge"
   assert.equal(n.indexOf("Keep history"), n.indexOf("Fetch auction houses") + 1);
   assert.ok(n.indexOf("Keep history") < n.indexOf("Publish release"));
   assert.equal(step("Upload prices to CurseForge")["continue-on-error"], "true");
+});
+
+test("A8a: the CurseForge upload is decided by the hour (or the manual input), not the event type", () => {
+  const s = step("Upload prices to CurseForge");
+  assert.doesNotMatch(s.if, /event_name/);
+  assert.match(s.run, /date -u \+%H/);
+  assert.match(s.run, /FORCE/);
+});
+
+// Stub `gh` and `sleep` on PATH; `gh` writes what it was asked to a log.
+function stubs({ ghListFails }) {
+  const dir = tmp(), log = join(dir, "gh.log");
+  writeFileSync(join(dir, "sleep"), "#!/bin/sh\nexit 0\n");
+  writeFileSync(join(dir, "gh"), [
+    "#!/bin/sh",
+    `echo "$1 $2" >> "${log.replace(/\\/g, "/")}"`,
+    `if [ "$1 $2" = "run list" ]; then ${ghListFails ? "exit 1" : "echo 0"}; fi`,
+    "exit 0", "",
+  ].join("\n"));
+  chmodSync(join(dir, "sleep"), 0o755);
+  chmodSync(join(dir, "gh"), 0o755);
+  const sep = process.platform === "win32" ? ";" : ":";
+  return { PATH: dir + sep + process.env.PATH, log };
+}
+
+test("A8b: if listing the runs fails, the next run is still started", () => {
+  const { PATH, log } = stubs({ ghListFails: true });
+  const r = runStep("Start the next run", tmp(), { PATH, Path: PATH, RUN_ID: "1" });
+  assert.equal(r.code, 0, r.out);
+  assert.match(readFileSync(log, "utf8"), /workflow run/, r.out);
+});
+
+test("A8b: with no other run waiting, the next run is started", () => {
+  const { PATH, log } = stubs({ ghListFails: false });
+  const r = runStep("Start the next run", tmp(), { PATH, Path: PATH, RUN_ID: "1" });
+  assert.equal(r.code, 0, r.out);
+  assert.match(readFileSync(log, "utf8"), /workflow run/, r.out);
 });
