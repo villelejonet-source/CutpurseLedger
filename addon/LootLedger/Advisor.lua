@@ -95,7 +95,7 @@ function A.Decide(id)
   -- Thin market: with only a handful listed, the "price" is whatever one seller
   -- typed in. Don't call a spike or a dip on that; tell the player to look.
   local listed = p.auctions
-  local thin = p.source == "blizzard" and listed ~= nil and listed < S.minListed
+  local thin = (p.source == "blizzard" or p.source == "scan") and listed ~= nil and listed < S.minListed
   d.thin = thin
   local gain = normal and (ah - normal) or 0
   if thin and (vs >= S.highVsNormal or vs <= S.lowVsNormal) then

@@ -12,6 +12,7 @@ Gathering.lua
 Trade.lua
 Ledger.lua
 Prices.lua
+Scan.lua
 Inventory.lua
 Advisor.lua
 VendorGuard.lua

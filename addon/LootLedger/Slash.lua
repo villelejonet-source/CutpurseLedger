@@ -121,6 +121,9 @@ SlashCmdList.LOOTLEDGER = function(msg)
       end
       DEFAULT_CHAT_FRAME:AddMessage("  /cl house <number> to set it yourself, /cl house auto to detect it at the AH.")
     end
+  elseif msg == "scan" then
+    -- Scan the auction house you're at (open it first): prices as listed right now.
+    ns.Scan.Start()
   elseif msg == "worth" or msg == "networth" then
     -- Gold on every character plus their items at current prices.
     local w = ns.Advisor.NetWorth()
@@ -146,6 +149,6 @@ SlashCmdList.LOOTLEDGER = function(msg)
     ns.Refresh()
     ns.Print("Everything on this character reset.")
   else
-    ns.Print("/cl  open · /cl overview | log | inventory | sell | gathering | skinning | pickpocket | mining | herbalism · /cl trending · /cl market [item] · /cl worth · /cl house · /cl box · /cl session · /cl reset")
+    ns.Print("/cl  open · /cl overview | log | inventory | sell | gathering | skinning | pickpocket | mining | herbalism · /cl trending · /cl market [item] · /cl worth · /cl scan · /cl house · /cl box · /cl session · /cl reset")
   end
 end
