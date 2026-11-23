@@ -40,12 +40,37 @@ GetQuestReward = function() end
 TakeTaxiNode = function() end
 RepairAllItems = function() end
 
--- Frames and events
+-- Frames and events. Methods a test doesn't care about (SetPoint, CreateFontString,
+-- SetText, ...) do nothing and return another such object.
+MAGIC = {}
+MAGIC.__index = function() return function() return setmetatable({}, MAGIC) end end
+UIParent = setmetatable({}, MAGIC)
+GameTooltip = setmetatable({}, MAGIC)
+local FrameMethods = {
+  SetScript = function(self, k, fn) self.scripts[k] = fn end,
+  HookScript = function(self, k, fn)
+    local old = self.scripts[k]
+    self.scripts[k] = old and function(...) old(...); fn(...) end or fn
+  end,
+  GetScript = function(self, k) return self.scripts[k] end,
+  RegisterEvent = function(self, e) self.events[e] = true end,
+  IsShown = function(self) return self.shown end,
+  Show = function(self)
+    if self.shown then return end
+    self.shown = true
+    if self.scripts.OnShow then self.scripts.OnShow(self) end
+  end,
+  Hide = function(self)
+    if not self.shown then return end
+    self.shown = false
+    if self.scripts.OnHide then self.scripts.OnHide(self) end
+  end,
+  SetShown = function(self, v) if v then self:Show() else self:Hide() end end,
+}
+local FrameMeta = { __index = function(_, k) return FrameMethods[k] or function() return setmetatable({}, MAGIC) end end }
 FRAMES = {}
 function CreateFrame()
-  local f = { scripts = {}, events = {}, shown = false }
-  function f:SetScript(k, fn) self.scripts[k] = fn end
-  function f:RegisterEvent(e) self.events[e] = true end
+  local f = setmetatable({ scripts = {}, events = {}, shown = false }, FrameMeta)
   FRAMES[#FRAMES + 1] = f
   return f
 end

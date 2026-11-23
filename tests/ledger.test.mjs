@@ -260,3 +260,43 @@ test("B9: commodity purchases are still recorded as bought", () => {
        GAIN(-1000)`);
   assert.deepEqual(trade(), ["Bought 2589 20 1000"]);
 });
+
+test("C1: LossRate is cached until a sale, return or vendor sale changes it", () => {
+  const { run, get } = vm();
+  run(`ns.Trade.Posted(1, 1, 100, NOW); ns.Trade.Returned(1, 1, NOW)
+       ns.Trade.Sale(2, 1, 1000, NOW)`);
+  assert.equal(get("ns.Trade.LossRate()"), 0.1);
+  run(`ns.Trade.Item(2).sales[1].net = 500`);          // changed behind its back: still cached
+  assert.equal(get("ns.Trade.LossRate()"), 0.1);
+  run(`ns.Trade.Sale(2, 1, 500, NOW)`);                // 1000 earned in all now, 100 lost
+  assert.equal(get("ns.Trade.LossRate()"), 0.1);
+  run(`ns.Trade.Returned(1, 1, NOW); ns.Trade.Item(1).lost[2].dep = 100; ns.Trade.Vendored(3, 1, 5, NOW)`);
+  assert.equal(get("ns.Trade.LossRate()"), 0.2);
+});
+
+test("C1: LossRate isn't shared between stores (another faction)", () => {
+  const { run, get } = vm();
+  run(`ns.Trade.Posted(1, 1, 100, NOW); ns.Trade.Returned(1, 1, NOW); ns.Trade.Sale(2, 1, 1000, NOW)`);
+  assert.equal(get("ns.Trade.LossRate()"), 0.1);
+  run(`FACTION = "Alliance"`);
+  assert.equal(get("ns.Trade.LossRate()"), 0);
+});
+
+test("C1: the box only refreshes while it's shown, and catches up when shown", () => {
+  const { run, get } = luaVM({
+    files: ["Core.lua", "Gathering.lua", "Trade.lua", "Ledger.lua", "UI/Box.lua"],
+    before: `ns.Theme = { C = { line = {}, muted = { 1, 1, 1 } }, GOLD_ICON = "",
+                          Panel = function() end, Icon = function() return setmetatable({}, MAGIC) end,
+                          Fill = function() return setmetatable({}, MAGIC) end, ActivityIcon = function() end }`,
+  });
+  run(`SUMS = 0
+       local sum = ns.Ledger.Sum
+       ns.Ledger.Sum = function(...) SUMS = SUMS + 1; return sum(...) end
+       ns.box:Hide()
+       ns.Refresh(); ns.Refresh()`);
+  assert.equal(get("SUMS"), 0);
+  run(`ns.box:Show()`);
+  assert.equal(get("SUMS"), 1);
+  run(`ns.Refresh()`);
+  assert.equal(get("SUMS"), 2);
+});

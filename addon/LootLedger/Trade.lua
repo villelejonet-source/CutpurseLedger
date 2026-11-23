@@ -45,6 +45,8 @@ function Tr.Store()
   return s
 end
 
+local lossCache  -- Tr.LossRate result { key, day, rate }; cleared when sales or losses change
+
 local function NewTotals()
   return { soldN = 0, soldNet = 0, lostDep = 0, boughtN = 0, boughtCost = 0, vendN = 0, vendNet = 0, ahN = 0 }
 end
@@ -103,6 +105,7 @@ end
 -- towards "sold", but the sale can't set a price per unit.
 function Tr.Sale(id, n, net, now)
   if not id then return end
+  lossCache = nil
   now = now or time()
   local e = Tr.Item(id, true)
   if n and n > 0 then
@@ -120,6 +123,7 @@ end
 -- Items back from an expired or cancelled auction: that listing's deposit is lost.
 function Tr.Returned(id, n, now)
   if not id or not n or n <= 0 then return end
+  lossCache = nil
   now = now or time()
   local e = Tr.Item(id, true)
   local dep = ClosePosts(e, n)
@@ -137,6 +141,7 @@ end
 -- Sold to a vendor: counts as sold, at the vendor's price.
 function Tr.Vendored(id, n, net, now)
   if not id or not n or n <= 0 then return end
+  lossCache = nil
   now = now or time()
   local e = Tr.Item(id, true)
   e.sales[#e.sales + 1] = { t = now, n = n, net = net, vendor = true }
@@ -202,16 +207,21 @@ end
 
 -- Share of AH income eaten by failed listings lately, across all items (0..0.5).
 -- Used to make prices from listings (not your own sales) a bit more realistic.
+-- It loops over every sale, and UnitValue asks for it per item valued: cached per
+-- store and day, cleared by Sale, Returned and Vendored.
 function Tr.LossRate(now)
   now = now or time()
+  local key, day = StoreKey(), math.floor(now / DAY)
+  if lossCache and lossCache.key == key and lossCache.day == day then return lossCache.rate end
   local oldest = now - Tr.SETTINGS.windowDays * DAY
   local net, lost = 0, 0
   for _, e in pairs(Tr.Store().items) do
     for _, s in ipairs(e.sales) do if s.t >= oldest and not s.vendor then net = net + s.net end end
     for _, l in ipairs(e.lost) do if l.t >= oldest then lost = lost + l.dep end end
   end
-  if net <= 0 then return 0 end
-  return math.min(0.5, lost / net)
+  local rate = net > 0 and math.min(0.5, lost / net) or 0
+  lossCache = { key = key, day = day, rate = rate }
+  return rate
 end
 
 -- Value per unit for an item, as close to what you'd really get as we can tell.
