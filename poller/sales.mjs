@@ -8,6 +8,7 @@
 //   - a stack that got smaller            -> the difference was bought
 //   - a listing that's gone               -> bought, unless...
 //       ...it had under 2 hours left (SHORT or MEDIUM)                         -> expired
+//       ...it had 2-12 hours left (LONG) and the snapshots are over 2 hours apart -> expired
 //       ...a stack of the same size was newly listed for the same item          -> cancelled and relisted
 //       ...it's a commodity and a cheaper listing of it is still there, untouched -> cancelled
 //          (commodity buyers always get the cheapest units first, so nobody
@@ -59,7 +60,8 @@ export function diffSnapshots(prev, cur) {
       }
       continue;
     }
-    if (tl === TIME_LEFT.SHORT || tl === TIME_LEFT.MEDIUM) { entry(item).expired += qty; continue; }
+    const mayHaveExpired = tl === TIME_LEFT.SHORT || tl === TIME_LEFT.MEDIUM || (tl === TIME_LEFT.LONG && gap > 2 * HOUR);
+    if (mayHaveExpired) { entry(item).expired += qty; continue; }
     if (commodities.has(item) && price > (cheapestUntouched.get(item) ?? Infinity) * 1.005) {
       entry(item).cancelled += qty;
       continue;

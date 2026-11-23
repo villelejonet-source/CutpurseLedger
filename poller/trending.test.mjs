@@ -201,3 +201,12 @@ test("A4: recordHour keeps the span of each diff and adds it to the day's hours 
   assert.deepEqual(h.hours.map((x) => x.h), [12, 1, undefined]);
   assert.equal(h.salesHours[new Date(NOW).toISOString().slice(0, 10)], 13);
 });
+
+test("A5: a LONG listing gone after a gap over 2 hours counts as expired, not bought", () => {
+  const prev = { t: 0, l: [[1, 100, 20, 50, LONG]] };
+  const d = diffSnapshots(prev, { t: 5 * HOUR, l: [] }).get(100);
+  assert.equal(d.units, 0);
+  assert.equal(d.expired, 20);
+  // ...but within a normal hour a vanished LONG listing was bought
+  assert.equal(diffSnapshots(prev, { t: HOUR, l: [] }).get(100).units, 20);
+});
