@@ -25,7 +25,7 @@ local FLAG_SIGN = {
 
 local lastMoney = 0
 local open, closedAt = {}, {}       -- which windows are open / when they closed
-local flag                          -- last action waiting for its money change
+local flags = {}                    -- actions waiting for their money change, oldest first
 local sellQueue, buyQueue = {}, {}  -- items handed to / bought from the vendor, oldest first
 
 function L.SyncMoney() lastMoney = GetMoney() end
@@ -135,8 +135,34 @@ end
 
 -- data: extra details for the trade record (see Trade.lua), e.g. { sale = itemID, n, net, deposit }.
 -- ttl: how long to wait for the money (AH actions can take a few seconds).
+-- Flags queue up, so actions taken back to back (two sale mails, two posts) each
+-- get their own money change.
 function L.Flag(source, item, qty, data, ttl)
-  flag = { source = source, item = item, qty = qty, data = data, expires = GetTime() + (ttl or ns.FLAG_TTL) }
+  flags[#flags + 1] = { source = source, item = item, qty = qty, data = data, expires = GetTime() + (ttl or ns.FLAG_TTL) }
+end
+
+local function DropExpiredFlags()
+  for i = #flags, 1, -1 do
+    if GetTime() >= flags[i].expires then table.remove(flags, i) end
+  end
+end
+
+-- The flag a money change belongs to: the oldest one whose direction matches, except
+-- that a sale mail whose expected amount (bid - AH cut + deposit) is exactly the
+-- change wins. Flags of the other direction stay queued for their own change.
+local function TakeFlag(delta)
+  DropExpiredFlags()
+  local first
+  for i, f in ipairs(flags) do
+    local sign = FLAG_SIGN[f.source]
+    if not sign or (sign > 0) == (delta > 0) then
+      if f.source == "ah_sale" and f.data and (f.data.net or 0) + (f.data.deposit or 0) == delta then
+        return table.remove(flags, i)
+      end
+      first = first or i
+    end
+  end
+  return first and table.remove(flags, first)
 end
 
 local function Active(ctx)
@@ -145,12 +171,8 @@ end
 
 -- Work out where a money change came from.
 local function Classify(delta)
-  local f = flag
-  flag = nil
-  if f and GetTime() < f.expires then
-    local sign = FLAG_SIGN[f.source]
-    if not sign or (sign > 0) == (delta > 0) then return f.source, f.item, f.qty, f.data end
-  end
+  local f = TakeFlag(delta)
+  if f then return f.source, f.item, f.qty, f.data end
   if Active("trade") then return "trade" end
   if Active("merchant") then
     local item = table.remove(delta > 0 and sellQueue or buyQueue, 1)

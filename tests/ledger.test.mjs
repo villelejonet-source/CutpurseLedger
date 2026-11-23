@@ -81,3 +81,42 @@ test("B1: another mail leaving doesn't count a waiting click", () => {
        TakeInboxMoney(1); SERVER_TAKE_MONEY(1)`);
   assert.deepEqual(trade(), []);
 });
+
+test("B2: two sale mails taken back to back each get their own money", () => {
+  const { run, log, trade } = vm();
+  run(`INBOX[1] = ${saleMail("Linen Cloth", 20, 1000, 50, 30)}       -- 980 arrives
+       INBOX[2] = ${saleMail("Light Leather", 10, 2000, 100, 40)}   -- 1940 arrives
+       TakeInboxMoney(1); TakeInboxMoney(2)
+       GAIN(980); GAIN(1940)`);
+  assert.deepEqual(log(), ["ah_sale 950 x20", "ah_deposit_back 30", "ah_sale 1900 x10", "ah_deposit_back 40"]);
+  assert.deepEqual(trade(), ["Sale 2589 20 950", "Sale 2318 10 1900"]);
+});
+
+test("B2: a sale mail's money is matched by its amount when it arrives out of order", () => {
+  const { run, trade } = vm();
+  run(`INBOX[1] = ${saleMail("Linen Cloth", 20, 1000, 50, 30)}
+       INBOX[2] = ${saleMail("Light Leather", 10, 2000, 100, 40)}
+       TakeInboxMoney(1); TakeInboxMoney(2)
+       GAIN(1940); GAIN(980)`);
+  assert.deepEqual(trade(), ["Sale 2318 10 1900", "Sale 2589 20 950"]);
+});
+
+test("B2: two posts back to back each get their own deposit", () => {
+  const { run, log, trade } = vm();
+  run(`FIRE("AUCTION_HOUSE_SHOW")
+       C_AuctionHouse.PostItem({ id = 2589 }, 1, 20)
+       C_AuctionHouse.PostItem({ id = 2318 }, 1, 10)
+       GAIN(-60); GAIN(-45)`);
+  assert.deepEqual(log(), ["ah_deposit -60", "ah_deposit -45"]);
+  assert.deepEqual(trade(), ["Posted 2589 20 60", "Posted 2318 10 45"]);
+});
+
+test("B2: a flag of the other direction stays queued for its own money", () => {
+  const { run, log, trade } = vm();
+  run(`FIRE("AUCTION_HOUSE_SHOW")
+       C_AuctionHouse.PostItem({ id = 2589 }, 1, 20)
+       GAIN(500)     -- an outbid refund arrives first
+       GAIN(-60)`);
+  assert.deepEqual(log(), ["ah_refund 500", "ah_deposit -60"]);
+  assert.deepEqual(trade(), ["Posted 2589 20 60"]);
+});
