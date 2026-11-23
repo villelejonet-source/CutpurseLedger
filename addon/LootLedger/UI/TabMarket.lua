@@ -47,7 +47,7 @@ function ns.OpenMarket(itemID)
   table.insert(recent, 1, itemID)
   while #recent > RECENT_MAX do table.remove(recent) end
   ns.ui.marketRecent = recent
-  ns.OpenTab("market")
+  ns.OpenTab("market", "item")
 end
 
 -- Change from the previous value with data, for "this week vs last week".
@@ -66,7 +66,7 @@ local SupplyRows  -- defined below Render
 local function Empty()
   local rows = {
     { kind = "title", icon = T.GOLD_ICON, text = "Market", sub = "price history for one item" },
-    { kind = "note", text = "Alt+click an item in your bags, click an item row in Inventory, Gathering or the Gold log, or type /cl market and shift-click an item into the chat line." },
+    { kind = "note", text = "Alt+click an item in your bags, click any item row in this window, or type /cl market and shift-click an item into the chat line." },
   }
   local recent = ns.ui.marketRecent or {}
   if #recent > 0 then
@@ -225,7 +225,36 @@ function SupplyRows(rows, id, p, h)
   return rows
 end
 
-ns.RegisterTab({ key = "market", label = "Market", subtabs = VIEWS, render = Render })
+-- Market tab: "Item" (one item's history) plus the trending lists.
+local subtabs = { { key = "item", label = "Item" } }
+for _, l in ipairs(ns.Views.trendingLists) do subtabs[#subtabs + 1] = { key = l.key, label = l.label } end
+ns.RegisterTab({
+  key = "market", label = "Market", order = 4, subtabs = subtabs,
+  choices = function(sub)
+    if sub == "item" then return ns.ui.marketItem and VIEWS or nil, "range" end
+    return ns.Views.trendingFilters, "filter"
+  end,
+  render = function(sub, period, choice)
+    if sub == "item" then
+      local rows = Render(choice or "day")
+      -- Other recently viewed items, to hop between them.
+      local others = {}
+      for _, id in ipairs(ns.ui.marketRecent or {}) do if id ~= ns.ui.marketItem then others[#others + 1] = id end end
+      if ns.ui.marketItem and #others > 0 then
+        rows[#rows + 1] = { kind = "section", text = "Recently viewed" }
+        for i = 1, math.min(5, #others) do
+          local id = others[i]
+          local name, q = ItemName(id)
+          local p = P.Get(id)
+          rows[#rows + 1] = { kind = "row", icon = T.ItemIcon(id), itemID = id, label = T.QualityText(name, q),
+            value = p.hasAH and ns.Money(P.AHPrice(p)) or T.Color("no AH price", C.muted) }
+        end
+      end
+      return rows
+    end
+    return ns.Views.trending(sub, period, choice or "all")
+  end,
+})
 
 -- Alt+click an item anywhere (bags, chat links, ...) to open its history.
 ns.Hook("HandleModifiedItemClick", function(link)

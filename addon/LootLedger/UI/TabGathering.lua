@@ -1,4 +1,4 @@
--- Cutpurse Ledger: Gathering tab. "Summary" compares all activities for the
+-- Cutpurse Ledger: gathering pages, shown under the Earnings tab. "Summary" compares all activities for the
 -- chosen period; each activity filter shows the details.
 
 local ADDON, ns = ...
@@ -50,7 +50,6 @@ local function RenderSummary(period)
   end
   rows[#rows + 1] = { kind = "note",
     text = "Value = gold looted + items at their AH market price. Items without an AH price count as 0." }
-  rows[#rows + 1] = { kind = "note", text = ns.Prices.StatusText() }
   return rows
 end
 
@@ -150,7 +149,4 @@ local function Render(key, period)
   return RenderActivity(G.BY_KEY[key], period)
 end
 
-local subtabs = { { key = "summary", label = "Summary" } }
-for _, a in ipairs(G.ACTIVITIES) do subtabs[#subtabs + 1] = { key = a.key, label = a.label } end
-
-ns.RegisterTab({ key = "gathering", label = "Gathering", periods = true, subtabs = subtabs, render = Render })
+ns.Views.gathering = Render  -- shown under Earnings (Summary and one subtab per activity)

@@ -58,4 +58,4 @@ local function Render(_, period)
   return rows
 end
 
-ns.RegisterTab({ key = "log", label = "Gold log", periods = true, render = Render })
+ns.Views.log = Render  -- shown as Earnings > Gold log

@@ -110,6 +110,7 @@ local function Render(listKey, _, filter)
       local owned = Owned(e.id)
       local quests = ns.Quests.For(e.id)
       local note = Reason(list.key, e)
+      if quests then note = note .. " · " .. (CONF[e.conf] or CONF[0])[1] .. " signal" end
       if owned > 0 then note = note .. " · you own " .. owned end
       local conf = CONF[e.conf] or CONF[0]
       rows[#rows + 1] = {
@@ -124,10 +125,10 @@ local function Render(listKey, _, filter)
     rows[#rows + 1] = { kind = "note", text = waiting > 0 and "Loading item details..." or "Nothing here right now." }
   end
   rows[#rows + 1] = { kind = "space", h = 6 }
-  rows[#rows + 1] = { kind = "note", text = ("Based on %d hours of purchase data and %d days of normal sales. Greys and items that can't be traded are hidden. Badges: strong / moderate / early = how sure the signal is; Quest = needed for a quest of that level (via Questie)."):format(t.hoursOfData, t.baselineDays) }
+  rows[#rows + 1] = { kind = "note", text = ("Based on %d hours of purchase data and %d days of normal sales. Greys and items that can't be traded are hidden. Badge: how sure the signal is, or Quest N = needed for a level N quest (via Questie)."):format(t.hoursOfData, t.baselineDays) }
   return rows
 end
 
-local subtabs = {}
-for _, l in ipairs(LISTS) do subtabs[#subtabs + 1] = { key = l.key, label = l.label } end
-ns.RegisterTab({ key = "trending", label = "Trending", subtabs = subtabs, filters = FILTERS, render = Render })
+ns.Views.trending = Render  -- shown as Market > Selling fast / Price climbing / ...
+ns.Views.trendingLists = LISTS
+ns.Views.trendingFilters = FILTERS

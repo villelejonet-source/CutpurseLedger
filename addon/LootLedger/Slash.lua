@@ -13,12 +13,16 @@ SlashCmdList.LOOTLEDGER = function(msg)
   msg = raw:lower():match("^%s*(.-)%s*$")
   if msg == "" then
     ns.OpenTab()
-  elseif msg == "overview" or msg == "log" or msg == "inventory" or msg == "trending" then
-    ns.OpenTab(msg)
-  elseif msg == "inv" or msg == "sell" then
-    ns.OpenTab("inventory", msg == "sell" and "SELL" or nil)
+  elseif msg == "home" or msg == "overview" then
+    ns.OpenTab("home")
+  elseif msg == "earnings" or msg == "log" then
+    ns.OpenTab("earnings", msg == "log" and "log" or "summary")
+  elseif msg == "inventory" or msg == "inv" or msg == "sell" then
+    ns.OpenTab("sell", msg == "sell" and "SELL" or "ALL")
+  elseif msg == "trending" then
+    ns.OpenTab("market", "hot")
   elseif G.BY_KEY[msg] or msg == "gathering" then
-    ns.OpenTab("gathering", G.BY_KEY[msg] and msg)
+    ns.OpenTab("earnings", G.BY_KEY[msg] and msg or "summary")
   elseif msg:match("^market") then
     -- /cl market            -> open the tab
     -- /cl market <link>     -> that item (shift-click an item into the chat line)

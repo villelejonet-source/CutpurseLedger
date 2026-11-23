@@ -72,9 +72,9 @@ local function Render(_, period)
   if toSell > 0 then
     rows[#rows + 1] = { kind = "row", badge = { text = "Sell now", color = C.green },
       label = toSell .. (toSell == 1 and " item" or " items") .. " at a good price",
-      note = "see Inventory", value = ns.Money(sellValue) }
+      note = "see Sell", value = ns.Money(sellValue) }
   end
   return rows
 end
 
-ns.RegisterTab({ key = "overview", label = "Overview", periods = true, render = Render })
+ns.Views.overview = Render  -- shown as Earnings > Summary

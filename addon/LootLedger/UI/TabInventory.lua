@@ -1,4 +1,4 @@
--- Cutpurse Ledger: Inventory tab. Everything you own on this realm (all
+-- Cutpurse Ledger: Sell tab. Everything you own on this realm (all
 -- characters, bags + bank + mail), each with the advisor's decision.
 
 local ADDON, ns = ...
@@ -23,14 +23,14 @@ local DESCRIPTIONS = {
   SELL = "Price is well above normal: post these on the AH now.",
   LIST = "Normal price: fine to post at market value.",
   HOLD = "Price is below normal: keep them and wait.",
-  CHECK = "White or better, but TSM has no AH price yet. Don't vendor these: check the AH.",
+  CHECK = "White or better, but there's no AH price for it yet. Don't vendor these: look it up on the AH first.",
   VENDOR = "Grey junk, soulbound items, and items the AH pays less for than a vendor.",
   ALL = "Everything you own on this realm.",
 }
 
 local function Render(filter)
   local plan = A.InventoryPlan()
-  local rows = { { kind = "title", icon = T.BAG_ICON, text = "Inventory",
+  local rows = { { kind = "title", icon = T.BAG_ICON, text = "Sell",
     sub = "all your characters on this realm, right now" } }
 
   local sums = {}
@@ -46,14 +46,15 @@ local function Render(filter)
     { label = "Vendor", value = ns.Money(sums.VENDOR or 0), color = BADGE_COLORS.VENDOR },
   } }
 
-  rows[#rows + 1] = { kind = "note", text = ns.Prices.StatusText() }
-  local status = ns.Prices.Status()
-  if status.source == "blizzard" and status.days < 7 then
-    rows[#rows + 1] = { kind = "note", text = "Sell now / Hold needs a few days of price history to compare against. Until then most items show List." }
+  if ns.Prices.Status().source == "none" then
+    rows[#rows + 1] = { kind = "note", text = ns.Prices.StatusText() }
   end
 
   local label = filter == "ALL" and "All items" or A.ACTIONS[filter].label
-  rows[#rows + 1] = { kind = "section", text = label }
+  local count = 0
+  for _, e in ipairs(plan) do if filter == "ALL" or e.decision.action == filter then count = count + 1 end end
+  rows[#rows + 1] = { kind = "section", text = label .. "  (" .. count .. ")",
+    right = filter ~= "CHECK" and ns.Money(filter == "ALL" and worth or (sums[filter] or 0)) or nil }
   rows[#rows + 1] = { kind = "note", text = DESCRIPTIONS[filter] }
 
   local shown, best = 0, nil
@@ -86,4 +87,4 @@ local function Render(filter)
   return rows
 end
 
-ns.RegisterTab({ key = "inventory", label = "Inventory", subtabs = FILTERS, render = Render })
+ns.RegisterTab({ key = "sell", label = "Sell", order = 3, subtabs = FILTERS, render = Render })

@@ -4,10 +4,12 @@
 --
 --   ns.RegisterTab({
 --     key = "market", label = "Market",
---     periods = true,                                 -- optional: show the period row
---     subtabs = { { key = "a", label = "A" }, ... },  -- optional: show a row of subtabs
---     filters = { { key = "f", label = "F" }, ... },  -- optional: a second, smaller row of filters
---     render = function(subKey, period, filterKey) return rows end,
+--     order = 4,                                      -- position in the tab row
+--     subtabs = { { key = "a", label = "A" }, ... },  -- optional: a row of subtabs
+--     periods = true,                                 -- optional: period dropdown (Session/Today/...)
+--     choices = function(subKey) return list, id end, -- optional: a dropdown of { key, label } instead,
+--                                                     --   remembered per id (e.g. "range", "filter")
+--     render = function(subKey, period, choiceKey) return rows end,
 --   })
 --
 -- render returns a list of row specs, drawn top to bottom:
@@ -17,6 +19,7 @@
 --   { kind = "row",     icon = tex, label = "AH sales", note = "grey text", value = "...",
 --                       bar = 0..1, barColor = C.gold, badge = { text = "Sell", color = C.green } }
 --   { kind = "note",    text = "small grey text, wraps" }
+--   { kind = "cards",   cards = { { label = "Sell now", value = "...", color = C.green, onClick = fn }, ... } }
 --   { kind = "chart",   values = {...}, labels = {...}, format = fn, height = 150 }  (line chart)
 --   { kind = "bars",    bars = { { label, value, text, color }, ... }, height = 120 }  (bars around zero)
 --   { kind = "space",   h = 8 }
@@ -29,17 +32,17 @@ local WIDTH, HEIGHT = 520, 600
 local PAD = 16
 local BODY_W = WIDTH - PAD * 2
 local tabs, tabByKey = {}, {}
+ns.Views = {}  -- page renderers that tabs combine (see TabEarnings, TabMarket)
 local mainTab
 local selectedSub = {}       -- tab key -> selected subtab key
-local selectedFilter = {}    -- tab key -> selected filter key
-local mainButtons, subButtons, periodButtons, filterButtons = {}, {}, {}, {}
+local selectedChoice = {}    -- tab key -> { dropdown id -> selected key }
+local mainButtons, subButtons = {}, {}
 
 function ns.RegisterTab(tab)
   tabs[#tabs + 1] = tab
   tabByKey[tab.key] = tab
   if tab.subtabs then selectedSub[tab.key] = tab.subtabs[1].key end
-  if tab.filters then selectedFilter[tab.key] = tab.filters[1].key end
-  mainTab = mainTab or tab.key
+  if not mainTab or (tab.order or 99) < (tabByKey[mainTab].order or 99) then mainTab = tab.key end
 end
 function ns.GetTab(key) return tabByKey[key] end
 
@@ -287,6 +290,58 @@ local function DrawNote(f, r)
   return math.max(18, (f.text:GetStringHeight() or 12) + 8)
 end
 
+---------------------------------------------------------------------------
+-- Action cards: { kind = "cards", cards = { { label, value, color, onClick }, ... } }
+-- Two per line, up to four. Clicking a card runs onClick.
+---------------------------------------------------------------------------
+local CARD_H = 54
+function MAKE.cards()
+  local f = CreateFrame("Frame", nil, content)
+  f.cards = {}
+  for i = 1, 4 do
+    local c = CreateFrame("Button", nil, f)
+    c.bg = T.Fill(c, "BACKGROUND", C.panel); c.bg:SetAllPoints()
+    c.accent = T.Fill(c, "ARTWORK", C.gold)
+    c.accent:SetPoint("TOPLEFT"); c.accent:SetPoint("BOTTOMLEFT"); c.accent:SetWidth(3)
+    c.label = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    c.label:SetPoint("TOPLEFT", 12, -9)
+    c.value = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    c.value:SetPoint("BOTTOMLEFT", 12, 9)
+    c.value:SetPoint("RIGHT", -8, 0)
+    c.value:SetJustifyH("LEFT")
+    if c.value.SetWordWrap then c.value:SetWordWrap(false) end
+    c.arrow = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    c.arrow:SetPoint("TOPRIGHT", -8, -9)
+    c.arrow:SetText(">")
+    c:SetScript("OnEnter", function(self) T.SetColor(self.bg, C.line, 1) end)
+    c:SetScript("OnLeave", function(self) T.SetColor(self.bg, C.panel, 1) end)
+    c:SetScript("OnClick", function(self) if self.onClick then self.onClick() end end)
+    f.cards[i] = c
+  end
+  return f
+end
+local function DrawCards(f, r)
+  local gap = 8
+  local w = (BODY_W - gap) / 2
+  for i, c in ipairs(f.cards) do
+    local spec = r.cards[i]
+    c:SetShown(spec ~= nil)
+    if spec then
+      local col, line = (i - 1) % 2, math.floor((i - 1) / 2)
+      c:ClearAllPoints()
+      c:SetPoint("TOPLEFT", col * (w + gap), -line * (CARD_H + gap))
+      c:SetSize(w, CARD_H)
+      T.SetColor(c.accent, spec.color or C.gold, 1)
+      c.label:SetText(spec.label)
+      SetTextColor(c.label, spec.color or C.muted)
+      c.value:SetText(spec.value)
+      c.onClick = spec.onClick
+      c.arrow:SetShown(spec.onClick ~= nil)
+    end
+  end
+  return math.ceil(#r.cards / 2) * (CARD_H + gap) + 4
+end
+
 function MAKE.space() return CreateFrame("Frame", nil, content) end
 
 ---------------------------------------------------------------------------
@@ -499,6 +554,7 @@ local function Draw(rows)
     elseif r.kind == "section" then DrawSection(f, r); stripe = 0
     elseif r.kind == "row" then stripe = stripe + 1; DrawRow(f, r, stripe)
     elseif r.kind == "note" then h = DrawNote(f, r)
+    elseif r.kind == "cards" then h = DrawCards(f, r)
     elseif r.kind == "chart" then h = r.height or 150; DrawChart(f, r, h)
     elseif r.kind == "bars" then h = r.height or 120; DrawBars(f, r, h)
     elseif r.kind == "space" then h = r.h or 10 end
@@ -511,11 +567,12 @@ local function Draw(rows)
 end
 
 ---------------------------------------------------------------------------
--- Tab rows
+-- Navigation: one row of main tabs, then (optionally) one row of subtabs with
+-- a small dropdown at its right end (the period, a chart range or a filter).
 ---------------------------------------------------------------------------
-local function Row(entries, kind, height, y, onClick)
+local function Row(entries, kind, height, width, onClick)
   local gap, n = kind == "tab" and 0 or 4, #entries
-  local w = (BODY_W - gap * (n - 1)) / n
+  local w = (width - gap * (n - 1)) / n
   local buttons = {}
   for i, e in ipairs(entries) do
     local b = T.Button(win, e.label, kind, function() onClick(e.key) end)
@@ -540,25 +597,85 @@ tabsLine:SetHeight(1)
 tabsLine:SetPoint("TOPLEFT", PAD, TABS_Y - 30)
 tabsLine:SetPoint("TOPRIGHT", -PAD, TABS_Y - 30)
 
+-- The dropdown: a chip showing the current choice; clicking opens a list.
+local DD_W = 104
+local dropdown = T.Button(win, "", "chip", nil)
+dropdown:SetSize(DD_W, 20)
+local menu = CreateFrame("Frame", nil, win)
+menu:SetFrameStrata("FULLSCREEN_DIALOG")
+menu:SetWidth(DD_W)
+T.Fill(menu, "BACKGROUND", C.header, 1):SetAllPoints()
+local menuBorder = T.Fill(menu, "BORDER", C.border)
+menuBorder:SetPoint("TOPLEFT", -1, 1); menuBorder:SetPoint("BOTTOMRIGHT", 1, -1)
+menu:Hide()
+local menuButtons = {}
+local currentChoices  -- { list = {...}, get = fn, set = fn }
+
+-- What the dropdown offers on the current tab/subtab, or nil.
+local function ChoicesFor(tab, sub)
+  if tab.choices then
+    local list, id = tab.choices(sub)
+    if list then
+      selectedChoice[tab.key] = selectedChoice[tab.key] or {}
+      local store = selectedChoice[tab.key]
+      if not store[id] then store[id] = list[1].key end
+      return { list = list, get = function() return store[id] end, set = function(k) store[id] = k end }
+    end
+  end
+  if tab.periods then
+    return { list = ns.PERIODS, get = function() return ns.ui.period end, set = function(k) ns.ui.period = k end }
+  end
+end
+
+local function LabelOf(list, key)
+  for _, e in ipairs(list) do if e.key == key then return e.label end end
+  return list[1].label
+end
+
+dropdown:SetScript("OnClick", function()
+  if menu:IsShown() or not currentChoices then menu:Hide(); return end
+  local list = currentChoices.list
+  for i, e in ipairs(list) do
+    local b = menuButtons[i]
+    if not b then
+      b = T.Button(menu, "", "chip", nil)
+      b:SetSize(DD_W - 4, 20)
+      b:SetPoint("TOPLEFT", 2, -2 - (i - 1) * 22)
+      menuButtons[i] = b
+    end
+    b.text:SetText(e.label)
+    b:SetSelected(e.key == currentChoices.get())
+    b:SetScript("OnClick", function()
+      currentChoices.set(e.key)
+      menu:Hide()
+      scroll:SetVerticalScroll(0)
+      ns.Refresh()
+    end)
+    b:Show()
+  end
+  for i = #list + 1, #menuButtons do menuButtons[i]:Hide() end
+  menu:SetHeight(#list * 22 + 2)
+  menu:ClearAllPoints()
+  menu:SetPoint("TOPRIGHT", dropdown, "BOTTOMRIGHT", 0, -2)
+  menu:Show()
+end)
+win:HookScript("OnHide", function() menu:Hide() end)
+
 local function Build()
-  mainButtons = Row(tabs, "tab", 30, TABS_Y, function(key)
+  table.sort(tabs, function(a, b) return (a.order or 99) < (b.order or 99) end)
+  mainButtons = Row(tabs, "tab", 30, BODY_W, function(key)
     mainTab = key
+    menu:Hide()
     scroll:SetVerticalScroll(0)
     ns.Refresh()
   end)
   Place(mainButtons, TABS_Y, true)
-  periodButtons = Row(ns.PERIODS, "pill", 22, 0, function(key) ns.ui.period = key; ns.Refresh() end)
   for _, tab in ipairs(tabs) do
     if tab.subtabs then
-      subButtons[tab.key] = Row(tab.subtabs, "chip", 20, 0, function(key)
+      local hasDropdown = tab.periods or tab.choices
+      subButtons[tab.key] = Row(tab.subtabs, "chip", 20, hasDropdown and (BODY_W - DD_W - 8) or BODY_W, function(key)
         selectedSub[tab.key] = key
-        scroll:SetVerticalScroll(0)
-        ns.Refresh()
-      end)
-    end
-    if tab.filters then
-      filterButtons[tab.key] = Row(tab.filters, "chip", 18, 0, function(key)
-        selectedFilter[tab.key] = key
+        menu:Hide()
         scroll:SetVerticalScroll(0)
         ns.Refresh()
       end)
@@ -596,24 +713,26 @@ ns.OnRefresh(function()
   for key, b in pairs(mainButtons) do b:SetSelected(key == mainTab) end
 
   local y = TABS_Y - 40
-  Place(periodButtons, y, tab.periods == true)
-  for key, b in pairs(periodButtons) do b:SetSelected(key == ns.ui.period) end
-  if tab.periods then y = y - 28 end
   for key, subs in pairs(subButtons) do
     Place(subs, y, key == mainTab)
     for subKey, b in pairs(subs) do b:SetSelected(subKey == selectedSub[key]) end
   end
-  if tab.subtabs then y = y - 26 end
-  for key, filters in pairs(filterButtons) do
-    Place(filters, y, key == mainTab)
-    for fKey, b in pairs(filters) do b:SetSelected(fKey == selectedFilter[key]) end
+  currentChoices = ChoicesFor(tab, selectedSub[mainTab])
+  dropdown:SetShown(currentChoices ~= nil)
+  if currentChoices then
+    dropdown.text:SetText(LabelOf(currentChoices.list, currentChoices.get()) .. "  |cff999999v|r")
+    dropdown:ClearAllPoints()
+    dropdown:SetPoint("TOPRIGHT", -PAD, y)
+  else
+    menu:Hide()
   end
-  if tab.filters then y = y - 24 end
+  if tab.subtabs or currentChoices then y = y - 28 end
+  footer:SetShown(tab.periods == true and ns.ui.period == "session")
 
   scroll:ClearAllPoints()
   scroll:SetPoint("TOPLEFT", PAD, y - 6)
   scroll:SetPoint("BOTTOMRIGHT", -PAD, 28)
-  Draw(tab.render(selectedSub[mainTab], ns.ui.period, selectedFilter[mainTab]))
+  Draw(tab.render(selectedSub[mainTab], ns.ui.period, currentChoices and currentChoices.get()))
 end)
 
 win:SetScript("OnShow", function() ns.Refresh() end)
