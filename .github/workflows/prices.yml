@@ -4,9 +4,12 @@ name: Prices
 # what was bought, update the price history and trending lists, and publish a
 # GitHub Release with Cutpurse Ledger + fresh prices.
 #
-# Blizzard refreshes the houses around :23. GitHub's scheduler sometimes runs
-# late or skips a slot, so there are two slots an hour (:40 and :10); whichever
-# comes second does nothing if a release went out in the last 45 minutes.
+# Blizzard refreshes the houses around :23. GitHub's own scheduler is "best
+# effort" and drops many runs when Actions is busy, so the feed keeps itself
+# going: every run ends by waiting until :35 of the next hour and starting the
+# next run (unless another run is already waiting). The schedule below is only
+# a safety net that restarts the chain if it ever breaks; a scheduled run does
+# nothing if a release went out in the last 45 minutes.
 on:
   schedule:
     - cron: "40 * * * *"
@@ -20,7 +23,7 @@ on:
 
 permissions:
   contents: write
-  actions: write   # lets the run keep its own schedule switched on (see "Keep schedule alive")
+  actions: write   # lets a run start the next one, and keep the schedule switched on
 
 concurrency:
   group: prices
@@ -29,7 +32,7 @@ concurrency:
 jobs:
   prices:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 120   # the work takes ~5 minutes; the rest is waiting for the next hour
     env:
       REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
       GH_TOKEN: ${{ github.token }}
@@ -134,3 +137,23 @@ jobs:
           if [ "$(date -u +%H)" = "03" ]; then
             gh api -X PUT "repos/${{ github.repository }}/actions/workflows/prices.yml/enable" && echo "schedule refreshed"
           fi
+
+      # Keep the feed going without relying on GitHub's scheduler: wait until :35
+      # of the next hour (Blizzard has refreshed by then), then start the next run.
+      # Runs even if this one failed, so one bad hour doesn't break the chain.
+      # Skipped if another run is already waiting, so there is only ever one chain.
+      - name: Start the next run
+        if: always()
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          now=$(date -u +%s)
+          target=$(( now / 3600 * 3600 + 35 * 60 ))
+          if [ "$target" -le $(( now + 120 )) ]; then target=$(( target + 3600 )); fi
+          echo "Next run at $(date -u -d "@$target" +%H:%M) UTC (waiting $(( (target - now) / 60 )) min)"
+          sleep $(( target - now ))
+          others=$(gh run list -R "${{ github.repository }}" --workflow prices.yml --limit 20 --json databaseId,status \
+            --jq "[.[] | select(.databaseId != $RUN_ID and (.status == \"queued\" or .status == \"in_progress\" or .status == \"pending\" or .status == \"waiting\" or .status == \"requested\"))] | length")
+          if [ "$others" != "0" ]; then echo "Another run is already waiting ($others): it carries on the chain."; exit 0; fi
+          gh workflow run prices.yml -R "${{ github.repository }}" --ref main
+          echo "Started the next run."
