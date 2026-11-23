@@ -19,6 +19,12 @@ A.SETTINGS = {
   risingTrend = 0.015,   -- gaining 1.5%+ a day = wait a little (unless it's a spike)
   minListed = 10,        -- fewer units listed than this: one odd listing sets "the price", don't act on it
   minSpikeGain = 1000,   -- a spike must be worth 10 silver more per item, or it's noise on a cheap item
+  -- Below normal: a dip (wait) or demand gone (sell)?
+  demandDown = 0.6,      -- sold in the last 24h at 60% or less of a normal day = demand dropped
+  demandSteady = 0.8,    -- 80% or more of a normal day = demand steady
+  minDemandNormal = 5,   -- the item must normally sell 5+ a day for its sales to tell anything
+  crashVsNormal = -0.25, -- a crash: 25%+ below normal...
+  crashVsRecent = -0.15, -- ...and 15%+ below the last two days, so it happened just now
 }
 
 A.ACTIONS = {
@@ -49,6 +55,35 @@ local function Quality(id)
   local it = ns.acc and ns.acc.items and ns.acc.items[id]
   if it and it.quality then return it.quality end
   return select(3, ns.ItemInfo(id))
+end
+
+-- Is demand for an item down, steady, or unknown (nil)? From the feed: the
+-- "Cooling off" list, or units bought in the last 24h against a normal day.
+-- Returns "down" | "steady" | nil, plus the P.Sales record (or nil).
+function A.Demand(id)
+  local S = A.SETTINGS
+  local s = ns.Prices.Sales and ns.Prices.Sales(id)
+  local t = ns.Prices.Trending and ns.Prices.Trending()
+  local tr = t and t.ready and t.byItem[id]
+  if tr and tr.list == "cooling" then return "down", s end
+  if s and s.normal and s.normal >= S.minDemandNormal then
+    if s.sold24 <= S.demandDown * s.normal then return "down", s end
+    if s.sold24 >= S.demandSteady * s.normal then return "steady", s end
+  end
+  return nil, s
+end
+
+-- How far the price is now below the higher of the last two days' prices
+-- (-0.3 = 30% lower), or nil without daily history.
+local function RecentDrop(h, ah)
+  local vals, best, seen = h and h.daily and h.daily.values or {}, nil, 0
+  for i = #vals, 1, -1 do
+    if vals[i] then
+      best, seen = math.max(best or 0, vals[i]), seen + 1
+      if seen == 2 then break end
+    end
+  end
+  return best and best > 0 and (ah / best - 1) or nil
 end
 
 -- Returns { action, reason, unit (copper you'd get per item), ah, normal, vs }
@@ -98,11 +133,22 @@ function A.Decide(id)
   local thin = (p.source == "blizzard" or p.source == "scan") and listed ~= nil and listed < S.minListed
   d.thin = thin
   local gain = normal and (ah - normal) or 0
+  local below = vs <= S.lowVsNormal
+  local demand, sales = A.Demand(id)
+  local drop = RecentDrop(h, ah)
+  local crash = vs <= S.crashVsNormal and drop ~= nil and drop <= S.crashVsRecent
+  d.demand, d.crash = demand, crash or nil
   if thin and (vs >= S.highVsNormal or vs <= S.lowVsNormal) then
     d.action = "LIST"
     d.reason = "only " .. listed .. " listed, price uncertain: check the AH"
   elseif vs >= S.spike and gain >= S.minSpikeGain then
     d.action, d.reason = "SELL", VsText(vs) .. ", spike"
+  elseif below and demand == "down" then
+    -- Cheaper AND fewer buyers: the price is unlikely to come back. Don't hold.
+    d.action = "SELL"
+    d.reason = Pct(vs) .. " vs normal and demand dropped"
+      .. ((sales and sales.normal) and (" (" .. sales.sold24 .. " sold in 24h, normally " .. math.floor(sales.normal + 0.5) .. ")") or "")
+      .. ", unlikely to come back"
   elseif falling then
     d.action, d.reason = "SELL", "falling " .. Pct(-trend):gsub("^%+", "") .. "/day, sell before it drops"
   elseif rising then
@@ -110,7 +156,13 @@ function A.Decide(id)
   elseif vs >= S.highVsNormal then
     d.action, d.reason = "SELL", VsText(vs)
     if gain < S.minSpikeGain then d.reason = d.reason .. ", only " .. ns.Money(gain) .. " more each" end
-  elseif vs <= S.lowVsNormal then
+  elseif below and demand == "steady" then
+    d.action, d.reason = "HOLD", Pct(vs) .. " vs normal, demand steady: a dip, wait"
+  elseif below and crash then
+    -- Dropped hard just now and no sales data says why: a dip or a collapse?
+    d.action = "LIST"
+    d.reason = "dropped " .. (Pct(-drop):gsub("^%+", "")) .. " since yesterday, can't tell a dip from demand gone: check the AH before holding"
+  elseif below then
     d.action, d.reason = "HOLD", Pct(vs) .. " vs normal, wait"
   else
     d.action, d.reason = "LIST", "Normal price"
