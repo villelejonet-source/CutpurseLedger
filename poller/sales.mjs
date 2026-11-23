@@ -1,13 +1,17 @@
 // What was bought on an auction house between two hourly snapshots.
 //
-// A snapshot is { t (Blizzard's Last-Modified, ms), l: [[auctionId, itemId, qty, unitPrice, timeLeft], ...] }
-// with timeLeft 0 = SHORT, 1 = MEDIUM, 2 = LONG, 3 = VERY_LONG.
+// A snapshot is { t (Blizzard's Last-Modified, ms), l: [[auctionId, itemId, qty, unitPrice, timeLeft, commodity], ...] }
+// with timeLeft 0 = SHORT, 1 = MEDIUM, 2 = LONG, 3 = VERY_LONG, and commodity 1 for stackable goods.
 //
-// Rules, per item:
+// Rules, per item. When unsure, we count it as *not* bought: trending looks at
+// changes against normal, so a cautious count is fine; an inflated one isn't.
 //   - a stack that got smaller            -> the difference was bought
 //   - a listing that's gone               -> bought, unless...
-//       ...it was about to run out (SHORT, or MEDIUM after a gap over 2 hours)  -> expired
+//       ...it had under 2 hours left (SHORT or MEDIUM)                         -> expired
 //       ...a stack of the same size was newly listed for the same item          -> cancelled and relisted
+//       ...it's a commodity and a cheaper listing of it is still there, untouched -> cancelled
+//          (commodity buyers always get the cheapest units first, so nobody
+//           skipped a cheaper stack to buy a pricier one)
 //   - more than 12 hours between snapshots -> too much changed to tell; nothing is counted
 
 export const TIME_LEFT = { SHORT: 0, MEDIUM: 1, LONG: 2, VERY_LONG: 3 };
@@ -26,12 +30,21 @@ export function diffSnapshots(prev, cur) {
 
   const entry = (item) => {
     let e = out.get(item);
-    if (!e) out.set(item, (e = { units: 0, auctions: 0, gold: 0, expired: 0, relisted: 0, posted: 0 }));
+    if (!e) out.set(item, (e = { units: 0, auctions: 0, gold: 0, expired: 0, relisted: 0, cancelled: 0, posted: 0 }));
     return e;
   };
   const curById = new Map();
-  for (const a of cur.l) curById.set(a[0], a);
+  const commodities = new Set();
+  for (const a of cur.l) { curById.set(a[0], a); if (a[5]) commodities.add(a[1]); }
+  for (const a of prev.l) if (a[5]) commodities.add(a[1]);
   const prevIds = new Set();
+
+  // Cheapest listing per item that's still there, untouched.
+  const cheapestUntouched = new Map();
+  for (const [id, item, qty, price] of prev.l) {
+    const now = curById.get(id);
+    if (now && now[2] === qty && price < (cheapestUntouched.get(item) ?? Infinity)) cheapestUntouched.set(item, price);
+  }
 
   const gone = new Map(); // item -> [{ qty, price }]
   for (const [id, item, qty, price, tl] of prev.l) {
@@ -46,8 +59,11 @@ export function diffSnapshots(prev, cur) {
       }
       continue;
     }
-    const aboutToExpire = tl === TIME_LEFT.SHORT || (tl === TIME_LEFT.MEDIUM && gap > 2 * HOUR);
-    if (aboutToExpire) { entry(item).expired += qty; continue; }
+    if (tl === TIME_LEFT.SHORT || tl === TIME_LEFT.MEDIUM) { entry(item).expired += qty; continue; }
+    if (commodities.has(item) && price > (cheapestUntouched.get(item) ?? Infinity) * 1.005) {
+      entry(item).cancelled += qty;
+      continue;
+    }
     let g = gone.get(item);
     if (!g) gone.set(item, (g = []));
     g.push({ qty, price });
@@ -75,7 +91,7 @@ export function diffSnapshots(prev, cur) {
     }
   }
   // Only keep items where something happened that matters for trending.
-  for (const [item, e] of out) if (!e.units && !e.expired && !e.relisted) out.delete(item);
+  for (const [item, e] of out) if (!e.units && !e.expired && !e.relisted && !e.cancelled) out.delete(item);
   return out;
 }
 

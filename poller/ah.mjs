@@ -104,12 +104,12 @@ function summarize(listings) {
 async function fetchHouse(house, accessToken) {
   const listings = new Map();
   const raw = []; // [auctionId, itemId, qty, unitPrice, timeLeft] for the sales diff
-  const add = (auction, id, unit, qty) => {
+  const add = (auction, id, unit, qty, commodity = false) => {
     if (!id || !(unit > 0) || !(qty > 0)) return;
     let rows = listings.get(id);
     if (!rows) listings.set(id, (rows = []));
     rows.push([unit, qty]);
-    raw.push([auction.id, id, qty, Math.round(unit), TIME_LEFT[auction.time_left] ?? TIME_LEFT.LONG]);
+    raw.push([auction.id, id, qty, Math.round(unit), TIME_LEFT[auction.time_left] ?? TIME_LEFT.LONG, commodity ? 1 : 0]);
   };
   const base = `/data/wow/ruleset/${AH_RULESET}/auctions/${house}`;
   const a = await getJson(base, accessToken);
@@ -117,7 +117,7 @@ async function fetchHouse(house, accessToken) {
     if (x.buyout) add(x, x.item?.id, x.buyout / x.quantity, x.quantity); // bid-only listings are skipped
   }
   const c = await getJson(`${base}/commodities`, accessToken);
-  for (const x of c.json.auctions ?? []) add(x, x.item?.id, x.unit_price, x.quantity);
+  for (const x of c.json.auctions ?? []) add(x, x.item?.id, x.unit_price, x.quantity, true);
   const updated = Date.parse(a.lastModified ?? "") || Date.now();
   return {
     items: summarize(listings),

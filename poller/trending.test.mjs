@@ -140,3 +140,27 @@ test("encodeEntry is compact and complete", () => {
   const s = encodeEntry({ id: 14047, sold24: 600, auctions24: 144, normal: 200, priceChange: 0.142, supplyChange: -0.3, hoursActive: 24, conf: 2 });
   assert.equal(s, "14047,600,144,200,142,-300,24,2");
 });
+
+test("commodities: a pricier stack that vanished while a cheaper one stayed was cancelled, not bought", () => {
+  // [auctionId, itemId, qty, unitPrice, timeLeft, commodity]
+  const prev = { t: 0, l: [[1, 100, 50, 10, LONG, 1], [2, 100, 50, 12, LONG, 1], [3, 100, 5000, 20, LONG, 1]] };
+  const cur = { t: HOUR, l: [[2, 100, 50, 12, LONG, 1]] };
+  const d = diffSnapshots(prev, cur).get(100);
+  assert.equal(d.units, 50, "only the cheapest stack (below the untouched one) counts as bought");
+  assert.equal(d.cancelled, 5000, "the big pricier stack was pulled by its seller");
+});
+
+test("commodities: buying from the bottom up counts in full", () => {
+  const prev = { t: 0, l: [[1, 100, 50, 10, LONG, 1], [2, 100, 50, 11, LONG, 1], [3, 100, 50, 12, LONG, 1]] };
+  const cur = { t: HOUR, l: [[3, 100, 20, 12, LONG, 1]] };
+  const d = diffSnapshots(prev, cur).get(100);
+  assert.equal(d.units, 130);
+  assert.equal(d.cancelled, 0);
+});
+
+test("MEDIUM listings that vanish within the hour count as expired", () => {
+  const prev = { t: 0, l: [[1, 100, 20, 50, MEDIUM, 1]] };
+  const d = diffSnapshots(prev, { t: HOUR, l: [] }).get(100);
+  assert.equal(d.units, 0);
+  assert.equal(d.expired, 20);
+});
