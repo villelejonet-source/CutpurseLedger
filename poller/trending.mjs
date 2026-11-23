@@ -66,7 +66,8 @@ export function itemStats(history, items, now, S = TREND) {
     }
     // Scale to a full day by the hours the diffs cover
     const scale = coverage > 0 ? 24 / coverage : 0;
-    const normalSeries = days.map((d) => history.sales[d]?.[id]?.[0] ?? 0);
+    // Each baseline day scaled to 24 hours by the hours its diffs cover, like sold24
+    const normalSeries = days.map((d) => ((history.sales[d]?.[id]?.[0] ?? 0) * 24) / history.salesHours[d]);
     const normal = days.length >= S.minBaselineDays ? baseline(normalSeries, 3) : null;
 
     const it = items[id];

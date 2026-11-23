@@ -210,3 +210,16 @@ test("A5: a LONG listing gone after a gap over 2 hours counts as expired, not bo
   // ...but within a normal hour a vanished LONG listing was bought
   assert.equal(diffSnapshots(prev, { t: HOUR, l: [] }).get(100).units, 20);
 });
+
+test("A6: baseline days with missing hours are scaled to 24 hours, like the last 24 hours are", () => {
+  const h = { hours: [], sales: {}, salesHours: {} };
+  for (let d = 7; d >= 2; d--) {
+    const key = new Date(NOW - d * DAY).toISOString().slice(0, 10);
+    h.sales[key] = { 2589: [18, 9, 18 * 500] }; // steady 1/hour, but only 18 hours of data that day
+    h.salesHours[key] = 18;
+  }
+  for (let i = 23; i >= 0; i--) h.hours.push({ t: NOW - i * HOUR, s: { 2589: [1, 1, 500] }, q: { 2589: [100, 500] }, diff: true, h: 1 });
+  const s = itemStats(h, { 2589: { market: 500, qty: 100 } }, NOW).stats.get("2589");
+  assert.equal(s.sold24, 24);
+  assert.ok(Math.abs(s.normal - 24) < 1e-9, `normal ${s.normal}`);
+});
