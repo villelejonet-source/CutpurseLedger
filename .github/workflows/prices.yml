@@ -1,11 +1,16 @@
 name: Prices
 
-# Every hour: read the WoW: Forever auction houses from Blizzard's API, update the
-# price history, and publish a GitHub Release with Cutpurse Ledger + fresh prices.
-# Blizzard refreshes the houses around :23, so this runs at :40.
+# Every hour: read the WoW: Forever auction houses from Blizzard's API, record
+# what was bought, update the price history and trending lists, and publish a
+# GitHub Release with Cutpurse Ledger + fresh prices.
+#
+# Blizzard refreshes the houses around :23. GitHub's scheduler sometimes runs
+# late or skips a slot, so there are two slots an hour (:40 and :10); whichever
+# comes second does nothing if a release went out in the last 45 minutes.
 on:
   schedule:
     - cron: "40 * * * *"
+    - cron: "10 * * * *"
   workflow_dispatch:
     inputs:
       curseforge:
@@ -15,6 +20,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # lets the run keep its own schedule switched on (see "Keep schedule alive")
 
 concurrency:
   group: prices
@@ -23,24 +29,41 @@ concurrency:
 jobs:
   prices:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
       GH_TOKEN: ${{ github.token }}
       KEEP_RELEASES: 48
     steps:
+      - name: Skip if a fresh release exists
+        id: fresh
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          last=$(gh release list -R "${{ github.repository }}" --limit 1 --json createdAt --jq '.[0].createdAt' || true)
+          if [ -n "$last" ] && [ $(( $(date -u +%s) - $(date -u -d "$last" +%s) )) -lt 2700 ]; then
+            echo "Last release $last is under 45 minutes old: nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.fresh.outputs.skip != 'true'
       - uses: actions/setup-node@v4
+        if: steps.fresh.outputs.skip != 'true'
         with:
           node-version: 24
 
       - name: Tests
-        run: node --test poller/analysis.test.mjs poller/history.test.mjs
+        if: steps.fresh.outputs.skip != 'true'
+        run: node --test poller/*.test.mjs
 
       - name: Get previous history
+        if: steps.fresh.outputs.skip != 'true'
         run: git clone --quiet --depth 1 --branch history "$REPO_URL" history || mkdir -p history
 
       - name: Fetch auction houses
+        if: steps.fresh.outputs.skip != 'true'
         run: node poller/ah.mjs
         env:
           BNET_CLIENT_ID: ${{ secrets.BNET_CLIENT_ID }}
@@ -50,6 +73,7 @@ jobs:
           AH_HOUSES: ${{ vars.AH_HOUSES || 'all' }}
 
       - name: Build zip
+        if: steps.fresh.outputs.skip != 'true'
         id: build
         run: |
           version=$(sed -n 's/^## Version: *//p' addon/LootLedger/LootLedger.toc | tr -d '\r')
@@ -61,6 +85,7 @@ jobs:
           echo "title=Cutpurse Ledger $version · prices $(date -u '+%Y-%m-%d %H:%M') UTC" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
+        if: steps.fresh.outputs.skip != 'true'
         run: |
           gh release create "${{ steps.build.outputs.tag }}" dist/CutpurseLedger-*.zip \
             --title "${{ steps.build.outputs.title }}" \
@@ -69,7 +94,7 @@ jobs:
 
       # CurseForge gets the price addon every 6 hours (00, 06, 12, 18 UTC), or when asked.
       - name: Upload prices to CurseForge
-        if: ${{ inputs.curseforge || (github.event_name == 'schedule' && (github.event.schedule == '40 * * * *')) }}
+        if: ${{ steps.fresh.outputs.skip != 'true' && (inputs.curseforge || github.event_name == 'schedule') }}
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           FORCE: ${{ inputs.curseforge }}
@@ -84,6 +109,7 @@ jobs:
 
       # History lives on its own branch, replaced every run (one commit, so the repo doesn't grow).
       - name: Keep history
+        if: steps.fresh.outputs.skip != 'true'
         run: |
           cd out/history
           git init --quiet --initial-branch history
@@ -93,7 +119,18 @@ jobs:
           git push --quiet --force "$REPO_URL" history
 
       - name: Prune old releases
+        if: steps.fresh.outputs.skip != 'true'
         run: |
           gh release list --limit 300 --json tagName,createdAt \
             --jq "sort_by(.createdAt) | reverse | .[${KEEP_RELEASES}:] | .[].tagName" |
           while read -r tag; do gh release delete "$tag" --yes --cleanup-tag; done
+
+      # GitHub switches off schedules in public repos after 60 days without repository
+      # activity. Re-enabling the workflow once a day resets that clock, so the price
+      # feed never stops just because nobody pushed code for a while.
+      - name: Keep schedule alive
+        if: github.event_name == 'schedule'
+        run: |
+          if [ "$(date -u +%H)" = "03" ]; then
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/prices.yml/enable" && echo "schedule refreshed"
+          fi

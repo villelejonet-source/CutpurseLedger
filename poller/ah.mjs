@@ -16,6 +16,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { dayKey } from "./analysis.mjs";
+import { TIME_LEFT, toSnapshot, diffSnapshots, recordHour } from "./sales.mjs";
+import { trendingLists, encodeEntry } from "./trending.mjs";
 import {
   addSnapshot, archiveOldDays, allDays, seriesFor, average, encodeHistory, labels, monthKeys, monthlyFor,
 } from "./history.mjs";
@@ -101,24 +103,37 @@ function summarize(listings) {
 
 async function fetchHouse(house, accessToken) {
   const listings = new Map();
-  const add = (id, unit, qty) => {
+  const raw = []; // [auctionId, itemId, qty, unitPrice, timeLeft] for the sales diff
+  const add = (auction, id, unit, qty) => {
     if (!id || !(unit > 0) || !(qty > 0)) return;
     let rows = listings.get(id);
     if (!rows) listings.set(id, (rows = []));
     rows.push([unit, qty]);
+    raw.push([auction.id, id, qty, Math.round(unit), TIME_LEFT[auction.time_left] ?? TIME_LEFT.LONG]);
   };
   const base = `/data/wow/ruleset/${AH_RULESET}/auctions/${house}`;
   const a = await getJson(base, accessToken);
   for (const x of a.json.auctions ?? []) {
-    if (x.buyout) add(x.item?.id, x.buyout / x.quantity, x.quantity); // bid-only listings are skipped
+    if (x.buyout) add(x, x.item?.id, x.buyout / x.quantity, x.quantity); // bid-only listings are skipped
   }
   const c = await getJson(`${base}/commodities`, accessToken);
-  for (const x of c.json.auctions ?? []) add(x.item?.id, x.unit_price, x.quantity);
+  for (const x of c.json.auctions ?? []) add(x, x.item?.id, x.unit_price, x.quantity);
+  const updated = Date.parse(a.lastModified ?? "") || Date.now();
   return {
     items: summarize(listings),
     listings: (a.json.auctions?.length ?? 0) + (c.json.auctions?.length ?? 0),
-    updated: Date.parse(a.lastModified ?? "") || Date.now(),
+    updated,
+    snapshot: toSnapshot(updated, raw),
   };
+}
+
+// Previous hour's listings, to see what was bought since.
+async function loadSnapshot(house) {
+  try {
+    return JSON.parse(gunzipSync(await readFile(join(HISTORY_DIR, `${house}.snap.json.gz`))).toString());
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +200,24 @@ for (const house of houses) {
   const history = await loadHistory(house.id);
   addSnapshot(history, data.items, now);
   archiveOldDays(history, now);
+
+  // What was bought since the previous snapshot (only if Blizzard has new data).
+  const prevSnap = await loadSnapshot(house.id);
+  const fresh = !prevSnap || data.snapshot.t > prevSnap.t;
+  const sold = prevSnap && fresh ? diffSnapshots(prevSnap, data.snapshot) : null;
+  recordHour(history, data.snapshot.t, sold, data.items);
+  await writeFile(join(OUT_DIR, "history", `${house.id}.snap.json.gz`), gzipSync(JSON.stringify(fresh ? data.snapshot : prevSnap)));
   await writeFile(join(OUT_DIR, "history", `${house.id}.json.gz`), gzipSync(JSON.stringify(history)));
+
+  // Trending lists and per-item sales for the game.
+  const trend = trendingLists(history, data.items, data.snapshot.t);
+  const listLua = Object.entries(trend.lists)
+    .map(([k, list]) => `${k} = { ${list.map((e) => `"${encodeEntry(e)}"`).join(", ")} }`).join(",\n      ");
+  const salesLines = [];
+  for (const s of trend.stats.values()) {
+    if (s.sold24 > 0 || (s.normal ?? 0) > 0) salesLines.push(`[${s.id}]="${s.sold24},${Math.round(s.normal ?? -1)},${s.auctions24}",`);
+  }
+  const soldUnits = sold ? [...sold.values()].reduce((a, e) => a + e.units, 0) : 0;
 
   const days = allDays(history, now);
   const months = monthKeys(history, days);
@@ -203,9 +235,12 @@ for (const house of houses) {
     `  [${house.id}] = { name = "${house.name}", faction = "${house.faction}", updated = ${Math.floor(data.updated / 1000)}, listings = ${data.listings}, days = ${daysOfHistory},\n` +
     `    ${labels(days, months)},\n` +
     `    items = {\n${lines.join("\n")}\n    },\n` +
-    `    hist = {\n${histLines.join("\n")}\n    } },`,
+    `    hist = {\n${histLines.join("\n")}\n    },\n` +
+    `    sales = {\n${salesLines.join("\n")}\n    },\n` +
+    `    trending = { ready = ${trend.ready}, hoursOfData = ${trend.coverage}, baselineDays = ${trend.baselineDays},\n      ${listLua} } },`,
   );
-  console.log(`house ${house.id} ${house.name}: ${data.listings} listings, ${lines.length} items (${histLines.length} with history), ${daysOfHistory} days of history`);
+  console.log(`house ${house.id} ${house.name}: ${data.listings} listings, ${lines.length} items (${histLines.length} with history), ${daysOfHistory} days of history; ` +
+    `bought since last snapshot: ${sold ? soldUnits + " units" : "no comparison yet"}; trending ${trend.ready ? Object.entries(trend.lists).map(([k, l]) => `${k} ${l.length}`).join(", ") : `not ready (${trend.coverage}h, ${trend.baselineDays} baseline days)`}`);
 }
 if (!houseBlocks.length) throw new Error("No auction house could be read");
 
@@ -213,6 +248,7 @@ const spdLines = Object.entries(spd).map(([id, n]) => `[${id}]=${n},`);
 const lua = `-- Generated by Cutpurse Ledger's price feed (poller/ah.mjs) from Blizzard's WoW: Forever auction house API. Do not edit.
 -- items[id] = "market,min,quantity,avg7,avg30" (copper per unit). spd = region sales per day (Saddlebag Exchange).
 -- hist[id]  = per-item history, see encodeHistory() in poller/history.mjs. dayLabels/weekLabels/monthLabels label its series.
+-- sales[id] = "bought last 24h,normal per day (-1 = unknown),separate auctions bought". trending = see poller/trending.mjs encodeEntry().
 LootLedgerPrices = {
   updated = ${Math.floor(now / 1000)},
   region = "${REGION}", ruleset = ${AH_RULESET},
