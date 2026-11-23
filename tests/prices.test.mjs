@@ -46,3 +46,32 @@ test("C3: with a house already set, old loot is priced at login", () => {
   const { get } = luaVM({ files: FILES, before: TWO_HOUSES + `LootLedgerAccountDB.chars["-Vanish"].house = 113` });
   assert.equal(get("ns.db.acts.skinning.lootV[2318]"), 10 * Math.floor(1000 * 0.95));
 });
+
+// Two houses that differ in what's listed, and the AH search API stubbed: every
+// SendSearchQuery is counted in QUERIES.
+const DETECT = feed(`houses = {
+  [113] = { name = "Horde A", faction = "Horde", listings = 900, items = { [2589] = "100,90,400,0,0", [2318] = "100,90,50,0,0" } },
+  [114] = { name = "Horde B", faction = "Horde", listings = 100, items = { [2589] = "100,90,60,0,0", [2318] = "100,90,900,0,0" } },
+},`) + `
+  Enum = { AuctionHouseSortOrder = { Price = 0 } }
+  QUERIES = 0
+  C_AuctionHouse.MakeItemKey = function(id) return { itemID = id } end
+  C_AuctionHouse.SendSearchQuery = function() QUERIES = QUERIES + 1 end
+  C_AuctionHouse.GetCommoditySearchResultsQuantity = function() return 0 end
+  C_AuctionHouse.GetCommoditySearchResultInfo = function() return nil end
+`;
+
+test("C4: closing and reopening the AH quickly runs one probe chain, not two", () => {
+  const { run, get } = luaVM({ files: [...FILES, "HouseDetect.lua"], before: DETECT });
+  run(`FIRE("AUCTION_HOUSE_SHOW"); ADVANCE(0.5)
+       FIRE("AUCTION_HOUSE_CLOSED"); ADVANCE(0.2)
+       FIRE("AUCTION_HOUSE_SHOW"); ADVANCE(1.6)`);
+  assert.equal(get("QUERIES"), 1);
+});
+
+test("C4: closing the AH before the first probe stops detection", () => {
+  const { run, get } = luaVM({ files: [...FILES, "HouseDetect.lua"], before: DETECT });
+  run(`FIRE("AUCTION_HOUSE_SHOW"); ADVANCE(0.5)
+       FIRE("AUCTION_HOUSE_CLOSED"); ADVANCE(30)`);
+  assert.equal(get("QUERIES"), 0);
+});
