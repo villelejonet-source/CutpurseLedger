@@ -223,3 +223,21 @@ test("B7: GetItemID throwing even for an existing location doesn't break the hoo
        GAIN(-60)`);
   assert.deepEqual(log(), ["ah_deposit -60"]);
 });
+
+test("B8: a post whose deposit never comes is recorded with deposit 0 when its flag expires", () => {
+  const { run, log, trade } = vm();
+  run(`FIRE("AUCTION_HOUSE_SHOW")
+       C_AuctionHouse.PostItem({ id = 2589 }, 1, 20)   -- no money moves
+       ADVANCE(11)`);
+  assert.deepEqual(trade(), ["Posted 2589 20 0"]);
+  assert.deepEqual(log(), []);
+});
+
+test("B8: a post whose deposit did come is recorded once", () => {
+  const { run, trade } = vm();
+  run(`FIRE("AUCTION_HOUSE_SHOW")
+       C_AuctionHouse.PostItem({ id = 2589 }, 1, 20)
+       GAIN(-60)
+       ADVANCE(11)`);
+  assert.deepEqual(trade(), ["Posted 2589 20 60"]);
+});

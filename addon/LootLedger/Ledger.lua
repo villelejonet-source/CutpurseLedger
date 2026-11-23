@@ -137,14 +137,22 @@ end
 -- ttl: how long to wait for the money (AH actions can take a few seconds).
 -- Flags queue up, so actions taken back to back (two sale mails, two posts) each
 -- get their own money change.
-function L.Flag(source, item, qty, data, ttl)
-  flags[#flags + 1] = { source = source, item = item, qty = qty, data = data, expires = GetTime() + (ttl or ns.FLAG_TTL) }
-end
-
+-- A post whose deposit never came was (probably) free: when its flag expires, it
+-- is still recorded, with deposit 0, so its sale or return can be matched later.
 local function DropExpiredFlags()
   for i = #flags, 1, -1 do
-    if GetTime() >= flags[i].expires then table.remove(flags, i) end
+    local f = flags[i]
+    if GetTime() >= f.expires then
+      table.remove(flags, i)
+      if f.source == "ah_deposit" and f.data and f.data.post then ns.Trade.Posted(f.data.post, f.data.n, 0) end
+    end
   end
+end
+
+function L.Flag(source, item, qty, data, ttl)
+  ttl = ttl or ns.FLAG_TTL
+  flags[#flags + 1] = { source = source, item = item, qty = qty, data = data, expires = GetTime() + ttl }
+  if data and data.post and C_Timer then C_Timer.After(ttl + 0.1, DropExpiredFlags) end
 end
 
 -- The flag a money change belongs to: the oldest one whose direction matches, except
