@@ -151,10 +151,14 @@ end)
 local button
 local function AddButton()
   if button or not S.Supported() or not AuctionHouseFrame then return end
-  button = CreateFrame("Button", nil, AuctionHouseFrame, "UIPanelButtonTemplate")
+  -- Named, so /run print(CutpurseLedgerScanButton:IsVisible()) can check it in game.
+  button = CreateFrame("Button", "CutpurseLedgerScanButton", AuctionHouseFrame, "UIPanelButtonTemplate")
   S.button = button
-  button:SetSize(120, 22)
-  button:SetPoint("TOPRIGHT", AuctionHouseFrame, "TOPRIGHT", -60, -1)
+  button:SetSize(130, 22)
+  -- Below the window, right of the Buy / Sell / Auctions tabs: free space. On the
+  -- title bar it was hidden behind the window's own border and title frames.
+  button:SetPoint("TOPRIGHT", AuctionHouseFrame, "BOTTOMRIGHT", -6, -2)
+  button:SetFrameLevel(AuctionHouseFrame:GetFrameLevel() + 20)
   button:SetText("Cutpurse scan")
   button:SetScript("OnClick", function() S.Start() end)
   button:SetScript("OnEnter", function(self)
