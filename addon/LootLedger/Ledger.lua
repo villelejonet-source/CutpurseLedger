@@ -20,7 +20,7 @@ for _, a in ipairs(ns.Gathering.ACTIVITIES) do L.SOURCE_LABELS[a.key] = a.label 
 -- Which way the money must move for an action flag to apply (+1 gain, -1 loss).
 local FLAG_SIGN = {
   repair = -1, ah_deposit = -1, ah_buy = -1, flight = -1, training = -1, bank = -1,
-  ah_sale = 1, ah_refund = 1, mail_in = 1, loot = 1,
+  ah_sale = 1, ah_refund = 1, mail_in = 1, loot = 1, quest = 1,
 }
 
 local lastMoney = 0
@@ -225,7 +225,6 @@ end)
 Hook("BuybackItem", function(index)
   buyQueue[#buyQueue + 1] = { link = GetBuybackItemLink and GetBuybackItemLink(index), qty = 1 }
 end)
-Hook("GetQuestReward", function() Flag("quest") end)
 Hook("TakeTaxiNode", function() Flag("flight") end)
 Hook("BuyTrainerService", function() Flag("training") end)
 Hook("PurchaseSlot", function() Flag("bank") end)
@@ -407,7 +406,7 @@ end
 
 ns.OnInit(L.SyncMoney)
 
-ns.On("QUEST_TURNED_IN", function() Flag("quest") end)
+ns.On("QUEST_TURNED_IN", function() Flag("quest") end)  -- the only quest flag (not GetQuestReward too)
 
 -- "You loot 5 Silver, 20 Copper": money from a corpse, whether or not we saw
 -- its loot window. The chat line can arrive before or after the money change.

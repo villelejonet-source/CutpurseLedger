@@ -156,3 +156,20 @@ test("B4: clicking a sale mail whose money is already taken doesn't label the ne
   assert.deepEqual(log(), ["mail_in 500"]);
   assert.deepEqual(trade(), []);
 });
+
+test("B5: a quest flag only takes money gained, so a purchase right after a turn-in isn't 'Quests'", () => {
+  const { run, log } = vm();
+  run(`FIRE("MERCHANT_SHOW")
+       GetQuestReward(1); FIRE("QUEST_TURNED_IN", 100, 0, 0)
+       GAIN(1200)            -- the quest's money
+       BuyMerchantItem(1, 1)
+       ADVANCE(1); GAIN(-500)`);
+  assert.deepEqual(log(), ["quest 1200", "vendor_buy -500"]);
+});
+
+test("B5: choosing a quest reward alone sets no flag (QUEST_TURNED_IN does)", () => {
+  const { run, log } = vm();
+  run(`GetQuestReward(1)
+       GAIN(-500)`);
+  assert.deepEqual(log(), ["other -500"]);
+});
