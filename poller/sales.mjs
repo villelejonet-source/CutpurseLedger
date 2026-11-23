@@ -8,6 +8,7 @@
 //   - a stack that got smaller            -> the difference was bought
 //   - a listing that's gone               -> bought, unless...
 //       ...it had under 2 hours left (SHORT or MEDIUM)                         -> expired
+//       ...it had 2-12 hours left (LONG) and the snapshots are over 2 hours apart -> expired
 //       ...a stack of the same size was newly listed for the same item          -> cancelled and relisted
 //       ...it's a commodity and a cheaper listing of it is still there, untouched -> cancelled
 //          (commodity buyers always get the cheapest units first, so nobody
@@ -59,7 +60,8 @@ export function diffSnapshots(prev, cur) {
       }
       continue;
     }
-    if (tl === TIME_LEFT.SHORT || tl === TIME_LEFT.MEDIUM) { entry(item).expired += qty; continue; }
+    const mayHaveExpired = tl === TIME_LEFT.SHORT || tl === TIME_LEFT.MEDIUM || (tl === TIME_LEFT.LONG && gap > 2 * HOUR);
+    if (mayHaveExpired) { entry(item).expired += qty; continue; }
     if (commodities.has(item) && price > (cheapestUntouched.get(item) ?? Infinity) * 1.005) {
       entry(item).cancelled += qty;
       continue;
@@ -96,17 +98,20 @@ export function diffSnapshots(prev, cur) {
 }
 
 // Record one hour into the history:
-//   history.hours = [{ t, s: { id: [units, auctions, gold] }, q: { id: [qtyListed, market] } }, ...]  (last 30)
+//   history.hours = [{ t, s: { id: [units, auctions, gold] }, q: { id: [qtyListed, market] }, diff, h }, ...]  (last 30)
 //   history.sales = { "YYYY-MM-DD": { id: [units, auctions, gold] } }                                  (120 days)
-//   history.salesHours = { "YYYY-MM-DD": hours with a sales diff }  (to know if a day is complete)
-export function recordHour(history, t, sold, items, { keepHours = 30, keepDays = 120 } = {}) {
+//   history.salesHours = { "YYYY-MM-DD": hours covered by sales diffs }  (to know if a day is complete)
+// span: hours between the two snapshots of the diff (stored as h). Records written
+// before spans were kept have no h: read them as 1 hour.
+export function recordHour(history, t, sold, items, { span = 1, keepHours = 30, keepDays = 120 } = {}) {
   history.hours ??= [];
   history.sales ??= {};
   history.salesHours ??= {};
   const s = {}, q = {};
   if (sold) for (const [id, e] of sold) if (e.units > 0) s[id] = [e.units, e.auctions, Math.round(e.gold)];
   for (const [id, it] of Object.entries(items)) q[id] = [it.qty, it.market];
-  history.hours.push({ t, s, q, diff: !!sold });
+  const h = Math.round(span * 100) / 100;
+  history.hours.push(sold ? { t, s, q, diff: true, h } : { t, s, q, diff: false });
   history.hours = history.hours.slice(-keepHours);
 
   if (sold) {
@@ -116,7 +121,7 @@ export function recordHour(history, t, sold, items, { keepHours = 30, keepDays =
       const e = (d[id] ??= [0, 0, 0]);
       e[0] += v[0]; e[1] += v[1]; e[2] += v[2];
     }
-    history.salesHours[day] = (history.salesHours[day] ?? 0) + 1;
+    history.salesHours[day] = Math.round(((history.salesHours[day] ?? 0) + h) * 100) / 100;
   }
   const oldest = new Date(t - keepDays * 86400e3).toISOString().slice(0, 10);
   for (const k of Object.keys(history.sales)) if (k < oldest) { delete history.sales[k]; delete history.salesHours[k]; }

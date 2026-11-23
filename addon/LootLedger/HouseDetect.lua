@@ -88,6 +88,7 @@ local function Finish()
 end
 
 local function Next()
+  if not running then return end  -- the AH closed (or detection finished) meanwhile
   local itemID = table.remove(queue, 1)
   if not itemID then Finish(); return end
   local ok = pcall(C_AuctionHouse.SendSearchQuery, C_AuctionHouse.MakeItemKey(itemID),
@@ -119,7 +120,7 @@ function ns.DetectHouse(force)
   local probes = PickProbes(feed)
   if #probes == 0 then return false end
   running, results, queue = probes, {}, { unpack(probes) }
-  C_Timer.After(1.5, Next)  -- let the AH window finish opening first
+  timer = C_Timer.NewTimer(1.5, Next)  -- let the AH window finish opening first (cancelled if it closes)
   return true
 end
 

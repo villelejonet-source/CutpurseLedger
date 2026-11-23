@@ -63,7 +63,22 @@ jobs:
 
       - name: Get previous history
         if: steps.fresh.outputs.skip != 'true'
-        run: git clone --quiet --depth 1 --branch history "$REPO_URL" history || mkdir -p history
+        # No history branch yet (ls-remote exit 2): start empty. Any other failure stops
+        # the run, so a network hiccup never replaces the real history with an empty one.
+        run: |
+          set +e
+          git ls-remote --quiet --exit-code --heads "$REPO_URL" history > /dev/null
+          code=$?
+          set -e
+          if [ "$code" -eq 2 ]; then
+            echo "No history branch yet: starting empty."
+            mkdir -p history
+          elif [ "$code" -ne 0 ]; then
+            echo "::error::Could not read the history branch (git ls-remote exit $code)"
+            exit 1
+          else
+            git clone --quiet --depth 1 --branch history "$REPO_URL" history
+          fi
 
       - name: Fetch auction houses
         if: steps.fresh.outputs.skip != 'true'
@@ -74,6 +89,17 @@ jobs:
           BNET_REGION: ${{ vars.BNET_REGION || 'eu' }}
           AH_RULESET: ${{ vars.AH_RULESET || '2' }}
           AH_HOUSES: ${{ vars.AH_HOUSES || 'all' }}
+
+      # History lives on its own branch, replaced every run (one commit, so the repo doesn't grow).
+      - name: Keep history
+        if: steps.fresh.outputs.skip != 'true'
+        run: |
+          cd out/history
+          git init --quiet --initial-branch history
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898299+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "history $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push --quiet --force "$REPO_URL" history
 
       - name: Build zip
         if: steps.fresh.outputs.skip != 'true'
@@ -96,8 +122,11 @@ jobs:
             --latest
 
       # CurseForge gets the price addon every 6 hours (00, 06, 12, 18 UTC), or when asked.
+      # Decided by the hour alone: chain runs are workflow_dispatch, not schedule.
+      # A CurseForge failure must not stop the steps after it.
       - name: Upload prices to CurseForge
-        if: ${{ steps.fresh.outputs.skip != 'true' && (inputs.curseforge || github.event_name == 'schedule') }}
+        continue-on-error: true
+        if: steps.fresh.outputs.skip != 'true'
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           FORCE: ${{ inputs.curseforge }}
@@ -109,17 +138,6 @@ jobs:
           (cd dist/pkg && zip -qr "../CutpurseLedgerPrices-EU-$(date -u +%Y%m%d%H%M).zip" LootLedger_Prices)
           node poller/curseforge.mjs --project 1825560 --file dist/CutpurseLedgerPrices-EU-*.zip \
             --name "Prices $stamp UTC" --changelog "Auction house prices for every EU WoW: Forever auction house, $stamp UTC."
-
-      # History lives on its own branch, replaced every run (one commit, so the repo doesn't grow).
-      - name: Keep history
-        if: steps.fresh.outputs.skip != 'true'
-        run: |
-          cd out/history
-          git init --quiet --initial-branch history
-          git add -A
-          git -c user.name="github-actions[bot]" -c user.email="41898299+github-actions[bot]@users.noreply.github.com" \
-            commit --quiet -m "history $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push --quiet --force "$REPO_URL" history
 
       - name: Prune old releases
         if: steps.fresh.outputs.skip != 'true'
@@ -153,7 +171,8 @@ jobs:
           echo "Next run at $(date -u -d "@$target" +%H:%M) UTC (waiting $(( (target - now) / 60 )) min)"
           sleep $(( target - now ))
           others=$(gh run list -R "${{ github.repository }}" --workflow prices.yml --limit 20 --json databaseId,status \
-            --jq "[.[] | select(.databaseId != $RUN_ID and (.status == \"queued\" or .status == \"in_progress\" or .status == \"pending\" or .status == \"waiting\" or .status == \"requested\"))] | length")
-          if [ "$others" != "0" ]; then echo "Another run is already waiting ($others): it carries on the chain."; exit 0; fi
+            --jq "[.[] | select(.databaseId != $RUN_ID and (.status == \"queued\" or .status == \"in_progress\" or .status == \"pending\" or .status == \"waiting\" or .status == \"requested\"))] | length" || true)
+          # If the list failed, assume no other run: a second chain is better than none.
+          if [ "${others:-0}" != "0" ]; then echo "Another run is already waiting ($others): it carries on the chain."; exit 0; fi
           gh workflow run prices.yml -R "${{ github.repository }}" --ref main
           echo "Started the next run."

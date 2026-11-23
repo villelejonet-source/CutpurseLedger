@@ -115,11 +115,11 @@ function I.Count(ch, id)
   return total, by
 end
 
--- Characters that share this character's AH (same realm).
+-- Characters that share this character's AH (same realm and faction).
 function I.RealmChars()
   local list = {}
   for _, ch in pairs(ns.acc.chars) do
-    if ch.realm == ns.db.realm then list[#list + 1] = ch end
+    if ns.Trade.SameAH(ch) then list[#list + 1] = ch end
   end
   return list
 end

@@ -6,16 +6,19 @@
 //         <HISTORY_DIR>/<house>.json.gz from the previous run
 // Writes: <OUT_DIR>/LootLedger_Prices/{LootLedger_Prices.toc, Prices.lua}   the data addon
 //         <OUT_DIR>/history/<house>.json.gz                                kept for the next run
+//         (every file of HISTORY_DIR is copied there first, so skipped houses keep theirs)
 //
 // Env: BNET_CLIENT_ID, BNET_CLIENT_SECRET (required)
 //      BNET_REGION (default eu), AH_RULESET (default 2 = Normal),
 //      AH_HOUSES   (default "all"; or a list like "113,114")
 //      HISTORY_DIR (default ./history), OUT_DIR (default ./out)
+//      RETRY_DELAY_MS (default 2000; pause before a retry, times the attempt number)
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { gzipSync, gunzipSync } from "node:zlib";
+import { mkdir, writeFile } from "node:fs/promises";
+import { gzipSync } from "node:zlib";
 import { join } from "node:path";
 import { dayKey } from "./analysis.mjs";
+import { carryOverHistory, readGzJson, fetchRetry, diffPlausible, snapshotTime, luaEscape } from "./feed.mjs";
 import { TIME_LEFT, toSnapshot, diffSnapshots, recordHour } from "./sales.mjs";
 import { trendingLists, encodeEntry } from "./trending.mjs";
 import {
@@ -29,6 +32,7 @@ const {
   AH_HOUSES = "all",
   HISTORY_DIR = "history",
   OUT_DIR = "out",
+  RETRY_DELAY_MS = "2000",
 } = process.env;
 
 if (!BNET_CLIENT_ID || !BNET_CLIENT_SECRET) throw new Error("Set BNET_CLIENT_ID and BNET_CLIENT_SECRET");
@@ -43,29 +47,27 @@ const ADDON = "LootLedger_Prices";
 // ---------------------------------------------------------------------------
 // Blizzard API
 // ---------------------------------------------------------------------------
+const RETRY = { delayMs: Number(RETRY_DELAY_MS) };
+
 async function token() {
-  const res = await fetch("https://oauth.battle.net/token", {
+  return fetchRetry("https://oauth.battle.net/token", {
     method: "POST",
     headers: {
       Authorization: "Basic " + Buffer.from(`${BNET_CLIENT_ID}:${BNET_CLIENT_SECRET}`).toString("base64"),
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: "grant_type=client_credentials",
-  });
-  if (!res.ok) throw new Error(`OAuth token: ${res.status}`);
-  return (await res.json()).access_token;
+  }, { ...RETRY, what: "OAuth token", read: async (res) => (await res.json()).access_token });
 }
 
 async function getJson(path, accessToken) {
   const url = new URL(`https://${REGION}.api.blizzard.com${path}`);
   url.searchParams.set("namespace", NAMESPACE);
   url.searchParams.set("locale", "en_GB");
-  for (let attempt = 1; ; attempt++) {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (res.ok) return { json: await res.json(), lastModified: res.headers.get("last-modified") };
-    if (attempt >= 3 || res.status === 404) throw new Error(`${res.status} from ${url.pathname}`);
-    await new Promise((r) => setTimeout(r, 2000 * attempt));
-  }
+  return fetchRetry(url, { headers: { Authorization: `Bearer ${accessToken}` } }, {
+    ...RETRY, what: url.pathname,
+    read: async (res) => ({ json: await res.json(), lastModified: res.headers.get("last-modified") }),
+  });
 }
 
 // All houses of the ruleset: [{ id, name, faction }]
@@ -118,7 +120,7 @@ async function fetchHouse(house, accessToken) {
   }
   const c = await getJson(`${base}/commodities`, accessToken);
   for (const x of c.json.auctions ?? []) add(x, x.item?.id, x.unit_price, x.quantity, true);
-  const updated = Date.parse(a.lastModified ?? "") || Date.now();
+  const updated = snapshotTime(a.lastModified, c.lastModified);
   return {
     items: summarize(listings),
     listings: (a.json.auctions?.length ?? 0) + (c.json.auctions?.length ?? 0),
@@ -127,27 +129,20 @@ async function fetchHouse(house, accessToken) {
   };
 }
 
-// Previous hour's listings, to see what was bought since.
+// Previous hour's listings, to see what was bought since. Only a missing file means
+// "none"; a corrupt or unreadable one stops the run instead of losing data.
 async function loadSnapshot(house) {
-  try {
-    return JSON.parse(gunzipSync(await readFile(join(HISTORY_DIR, `${house}.snap.json.gz`))).toString());
-  } catch {
-    return null;
-  }
+  return readGzJson(join(HISTORY_DIR, `${house}.snap.json.gz`));
 }
 
 // ---------------------------------------------------------------------------
 // History files
 // ---------------------------------------------------------------------------
 async function loadHistory(house) {
-  try {
-    const h = JSON.parse(gunzipSync(await readFile(join(HISTORY_DIR, `${house}.json.gz`))).toString());
-    h.days ??= {};
-    h.months ??= {};
-    return h;
-  } catch {
-    return { days: {}, months: {} };
-  }
+  const h = (await readGzJson(join(HISTORY_DIR, `${house}.json.gz`))) ?? {};
+  h.days ??= {};
+  h.months ??= {};
+  return h;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +174,8 @@ const now = Date.now();
 const accessToken = await token();
 await mkdir(join(OUT_DIR, ADDON), { recursive: true });
 await mkdir(join(OUT_DIR, "history"), { recursive: true });
+// Start from last run's history, so houses skipped below keep theirs.
+console.log(`history carried over: ${await carryOverHistory(HISTORY_DIR, join(OUT_DIR, "history"))} files`);
 
 const spd = await salesPerDay();
 console.log(`sales per day: ${Object.keys(spd).length} items`);
@@ -204,8 +201,10 @@ for (const house of houses) {
   // What was bought since the previous snapshot (only if Blizzard has new data).
   const prevSnap = await loadSnapshot(house.id);
   const fresh = !prevSnap || data.snapshot.t > prevSnap.t;
-  const sold = prevSnap && fresh ? diffSnapshots(prevSnap, data.snapshot) : null;
-  recordHour(history, data.snapshot.t, sold, data.items);
+  const plausible = diffPlausible(prevSnap, data.snapshot);
+  if (fresh && !plausible) console.log(`house ${house.id} ${house.name}: listings fell from ${prevSnap.l.length} to ${data.snapshot.l.length}, sales diff skipped`);
+  const sold = prevSnap && fresh && plausible ? diffSnapshots(prevSnap, data.snapshot) : null;
+  recordHour(history, data.snapshot.t, sold, data.items, { span: sold ? (data.snapshot.t - prevSnap.t) / 3600e3 : 0 });
   await writeFile(join(OUT_DIR, "history", `${house.id}.snap.json.gz`), gzipSync(JSON.stringify(fresh ? data.snapshot : prevSnap)));
   await writeFile(join(OUT_DIR, "history", `${house.id}.json.gz`), gzipSync(JSON.stringify(history)));
 
@@ -232,7 +231,7 @@ for (const house of houses) {
   }
   const daysOfHistory = Object.keys(history.days).length;
   houseBlocks.push(
-    `  [${house.id}] = { name = "${house.name}", faction = "${house.faction}", updated = ${Math.floor(data.updated / 1000)}, listings = ${data.listings}, days = ${daysOfHistory},\n` +
+    `  [${house.id}] = { name = "${luaEscape(house.name)}", faction = "${luaEscape(house.faction)}", updated = ${Math.floor(data.updated / 1000)}, listings = ${data.listings}, days = ${daysOfHistory},\n` +
     `    ${labels(days, months)},\n` +
     `    items = {\n${lines.join("\n")}\n    },\n` +
     `    hist = {\n${histLines.join("\n")}\n    },\n` +

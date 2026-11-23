@@ -20,12 +20,12 @@ for _, a in ipairs(ns.Gathering.ACTIVITIES) do L.SOURCE_LABELS[a.key] = a.label 
 -- Which way the money must move for an action flag to apply (+1 gain, -1 loss).
 local FLAG_SIGN = {
   repair = -1, ah_deposit = -1, ah_buy = -1, flight = -1, training = -1, bank = -1,
-  ah_sale = 1, ah_refund = 1, mail_in = 1, loot = 1,
+  ah_sale = 1, ah_refund = 1, mail_in = 1, loot = 1, quest = 1,
 }
 
 local lastMoney = 0
 local open, closedAt = {}, {}       -- which windows are open / when they closed
-local flag                          -- last action waiting for its money change
+local flags = {}                    -- actions waiting for their money change, oldest first
 local sellQueue, buyQueue = {}, {}  -- items handed to / bought from the vendor, oldest first
 
 function L.SyncMoney() lastMoney = GetMoney() end
@@ -135,8 +135,42 @@ end
 
 -- data: extra details for the trade record (see Trade.lua), e.g. { sale = itemID, n, net, deposit }.
 -- ttl: how long to wait for the money (AH actions can take a few seconds).
+-- Flags queue up, so actions taken back to back (two sale mails, two posts) each
+-- get their own money change.
+-- A post whose deposit never came was (probably) free: when its flag expires, it
+-- is still recorded, with deposit 0, so its sale or return can be matched later.
+local function DropExpiredFlags()
+  for i = #flags, 1, -1 do
+    local f = flags[i]
+    if GetTime() >= f.expires then
+      table.remove(flags, i)
+      if f.source == "ah_deposit" and f.data and f.data.post then ns.Trade.Posted(f.data.post, f.data.n, 0) end
+    end
+  end
+end
+
 function L.Flag(source, item, qty, data, ttl)
-  flag = { source = source, item = item, qty = qty, data = data, expires = GetTime() + (ttl or ns.FLAG_TTL) }
+  ttl = ttl or ns.FLAG_TTL
+  flags[#flags + 1] = { source = source, item = item, qty = qty, data = data, expires = GetTime() + ttl }
+  if data and data.post and C_Timer then C_Timer.After(ttl + 0.1, DropExpiredFlags) end
+end
+
+-- The flag a money change belongs to: the oldest one whose direction matches, except
+-- that a sale mail whose expected amount (bid - AH cut + deposit) is exactly the
+-- change wins. Flags of the other direction stay queued for their own change.
+local function TakeFlag(delta)
+  DropExpiredFlags()
+  local first
+  for i, f in ipairs(flags) do
+    local sign = FLAG_SIGN[f.source]
+    if not sign or (sign > 0) == (delta > 0) then
+      if f.source == "ah_sale" and f.data and (f.data.net or 0) + (f.data.deposit or 0) == delta then
+        return table.remove(flags, i)
+      end
+      first = first or i
+    end
+  end
+  return first and table.remove(flags, first)
 end
 
 local function Active(ctx)
@@ -145,16 +179,23 @@ end
 
 -- Work out where a money change came from.
 local function Classify(delta)
-  local f = flag
-  flag = nil
-  if f and GetTime() < f.expires then
-    local sign = FLAG_SIGN[f.source]
-    if not sign or (sign > 0) == (delta > 0) then return f.source, f.item, f.qty, f.data end
-  end
+  local f = TakeFlag(delta)
+  if f then return f.source, f.item, f.qty, f.data end
   if Active("trade") then return "trade" end
   if Active("merchant") then
-    local item = table.remove(delta > 0 and sellQueue or buyQueue, 1)
-    return delta > 0 and "vendor_sell" or "vendor_buy", item and item.link, item and item.qty
+    if delta < 0 then
+      local item = table.remove(buyQueue, 1)
+      return "vendor_buy", item and item.link, item and item.qty
+    end
+    -- A sale: the first queued item whose sell price matches the money. Items queued
+    -- before it never sold (the click did nothing); with no match, no item is named.
+    for i, item in ipairs(sellQueue) do
+      if item.price * item.qty == delta then
+        for _ = 1, i do table.remove(sellQueue, 1) end
+        return "vendor_sell", item.link, item.qty
+      end
+    end
+    return "vendor_sell"
   end
   if Active("mail") then return delta > 0 and "mail_in" or "mail_out" end
   if Active("auction") then return delta > 0 and "ah_refund" or "ah_buy" end
@@ -173,8 +214,9 @@ local Flag, Hook = L.Flag, ns.Hook
 local function OnUseContainerItem(bag, slot)
   if InRepairMode and InRepairMode() then Flag("repair"); return end
   if open.merchant then
-    local link, count = ns.ContainerItem(bag, slot)
-    if link then sellQueue[#sellQueue + 1] = { link = link, qty = count or 1 } end
+    local link, count, noValue = ns.ContainerItem(bag, slot)
+    local price = link and not noValue and ns.SellPrice(link) or 0
+    if price > 0 then sellQueue[#sellQueue + 1] = { link = link, qty = count or 1, price = price } end
   end
 end
 if C_Container and type(C_Container.UseContainerItem) == "function" then
@@ -191,7 +233,6 @@ end)
 Hook("BuybackItem", function(index)
   buyQueue[#buyQueue + 1] = { link = GetBuybackItemLink and GetBuybackItemLink(index), qty = 1 }
 end)
-Hook("GetQuestReward", function() Flag("quest") end)
 Hook("TakeTaxiNode", function() Flag("flight") end)
 Hook("BuyTrainerService", function() Flag("training") end)
 Hook("PurchaseSlot", function() Flag("bank") end)
@@ -210,36 +251,33 @@ end)
 
 -- Modern auction house (WoW: Forever runs the modern client)
 if C_AuctionHouse then
+  -- GetItemID may throw for a location that holds nothing (unverified): check first,
+  -- and never let it break the hook.
   local function ItemIDAt(location)
-    return location and C_Item and C_Item.GetItemID and C_Item.GetItemID(location)
+    if not (location and C_Item and C_Item.GetItemID) then return nil end
+    if C_Item.DoesItemExist and not C_Item.DoesItemExist(location) then return nil end
+    local ok, id = pcall(C_Item.GetItemID, location)
+    return ok and id or nil
   end
   local function OnPost(location, _, quantity)
     local id = ItemIDAt(location)
     Flag("ah_deposit", nil, nil, id and { post = id, n = quantity or 1 }, AH_TTL)
   end
-  local lastKey  -- the item whose auctions you're looking at (for PlaceBid)
   local commodity
   local function HookAH(name, fn)
     if type(C_AuctionHouse[name]) == "function" then hooksecurefunc(C_AuctionHouse, name, fn) end
   end
   HookAH("PostItem", OnPost)
   HookAH("PostCommodity", OnPost)
-  HookAH("SendSearchQuery", function(itemKey) lastKey = itemKey end)
   HookAH("StartCommoditiesPurchase", function(itemID, quantity) commodity = { id = itemID, n = quantity } end)
   HookAH("ConfirmCommoditiesPurchase", function(itemID, quantity)
     local n = quantity or (commodity and commodity.id == itemID and commodity.n) or nil
     Flag("ah_buy", nil, n, { buy = itemID, n = n }, AH_TTL)
   end)
-  HookAH("PlaceBid", function(auctionID)
-    local id, n = lastKey and lastKey.itemID, nil
-    if lastKey and C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetItemSearchResultInfo then
-      for i = 1, C_AuctionHouse.GetNumItemSearchResults(lastKey) or 0 do
-        local r = C_AuctionHouse.GetItemSearchResultInfo(lastKey, i)
-        if r and r.auctionID == auctionID then n = r.quantity; break end
-      end
-    end
-    Flag("ah_buy", nil, n, id and { buy = id, n = n or 1 }, AH_TTL)
-  end)
+  -- A bid (or buyout) on an item auction: logged as an AH purchase, but not added
+  -- to the trade record. A bid can be outbid and refunded, and the item last
+  -- searched for isn't reliably the one bid on.
+  HookAH("PlaceBid", function() Flag("ah_buy", nil, nil, nil, AH_TTL) end)
 end
 
 -- Mail: AH sale money (with the sale details), expired/cancelled auctions, other mail.
@@ -263,25 +301,88 @@ function L.Invoice(index)
     net = (bid or 0) - (consignment or 0), deposit = deposit or 0 }
 end
 
-local lastReturn = {}  -- index -> time, so one click isn't counted twice
-local function OnMailItems(index, attachment)
-  if not (GetInboxHeaderInfo and GetInboxItem) then return end
-  local subject = select(4, GetInboxHeaderInfo(index))
-  if not IsReturnedAuction(subject) then return end
-  local key = index .. ":" .. tostring(attachment) .. ":" .. subject
-  if lastReturn[key] and GetTime() - lastReturn[key] < 5 then return end
-  lastReturn[key] = GetTime()
-  local first, last = attachment or 1, attachment or (ATTACHMENTS_MAX_RECEIVE or 16)
-  for a = first, last do
-    local name, itemID, _, count = GetInboxItem(index, a)
-    if name then ns.Trade.Returned(itemID or ns.Trade.ItemIDByName(name), count or 1) end
+-- Items from an expired/cancelled auction count as returned only once they have
+-- really left the mailbox (full bags: nothing happens). A click remembers what it
+-- was for (item and stack size); when the number of such attachments in returned-
+-- auction mails drops, that many clicks are recorded, oldest first. Counting rather
+-- than looking at the clicked index survives mails shifting up when one is removed,
+-- and two identical mails ("Auction expired: Linen Cloth" twice) count twice.
+local RETURN_WAIT = 5     -- seconds a click waits for its attachment to leave
+local pendingReturns = {} -- "id:count" -> { id, count, base = attachments like it when clicked, clicks = { { index, a, at } } }
+
+local function AttachmentID(index, a)
+  local name, itemID, _, count = GetInboxItem(index, a)
+  if not name then return nil end
+  return itemID or ns.Trade.ItemIDByName(name), count or 1
+end
+
+-- How many attachments of this item and stack size are in returned-auction mails.
+local function CountReturned(id, count)
+  local n = 0
+  for i = 1, (GetInboxNumItems and GetInboxNumItems() or 0) do
+    if IsReturnedAuction(select(4, GetInboxHeaderInfo(i))) then
+      for a = 1, (ATTACHMENTS_MAX_RECEIVE or 16) do
+        local aid, acount = AttachmentID(i, a)
+        if aid == id and acount == count then n = n + 1 end
+      end
+    end
+  end
+  return n
+end
+
+local function CheckReturns()
+  for key, r in pairs(pendingReturns) do
+    for i = #r.clicks, 1, -1 do
+      if GetTime() - r.clicks[i].at > RETURN_WAIT then table.remove(r.clicks, i) end
+    end
+    if #r.clicks > 0 then
+      local left = r.base - CountReturned(r.id, r.count)
+      while left > 0 and #r.clicks > 0 do
+        table.remove(r.clicks, 1)
+        r.base, left = r.base - 1, left - 1
+        ns.Trade.Returned(r.id, r.count)
+      end
+    end
+    if #r.clicks == 0 then pendingReturns[key] = nil end
   end
 end
 
+local function OnMailItems(index, attachment)
+  if not (GetInboxHeaderInfo and GetInboxItem) then return end
+  if not IsReturnedAuction(select(4, GetInboxHeaderInfo(index))) then return end
+  CheckReturns()  -- settle earlier clicks first: what's still pending hasn't left yet
+  local first, last = attachment or 1, attachment or (ATTACHMENTS_MAX_RECEIVE or 16)
+  for a = first, last do
+    local id, count = AttachmentID(index, a)
+    if id then
+      local key = id .. ":" .. count
+      local r = pendingReturns[key]
+      if not r then
+        r = { id = id, count = count, base = CountReturned(id, count), clicks = {} }
+        pendingReturns[key] = r
+      end
+      local again  -- the same attachment clicked again, nothing left since: one click
+      for _, c in ipairs(r.clicks) do
+        if c.index == index and c.a == a then again = c end
+      end
+      if again then again.at = GetTime()
+      else r.clicks[#r.clicks + 1] = { index = index, a = a, at = GetTime() } end
+    end
+  end
+end
+ns.On("MAIL_INBOX_UPDATE", CheckReturns)
+ns.On("MAIL_CLOSED", function() pendingReturns = {} end)
+
 local function OnMailTake(index)
+  -- No money on the mail (already taken, or an item-only mail): no money change is
+  -- coming, so a flag would only mislabel the next one.
+  local money = GetInboxHeaderInfo and select(5, GetInboxHeaderInfo(index))
+  if not money or money <= 0 then return end
   local inv = L.Invoice(index)
   if inv then Flag("ah_sale", inv.name, inv.n, inv); return end
   local sender = GetInboxHeaderInfo and select(3, GetInboxHeaderInfo(index))
+  -- English clients only: other locales name the AH sender differently, and their
+  -- refunds are logged as "Mail received".
   if sender and sender:find("Auction", 1, true) then Flag("ah_refund") else Flag("mail_in") end
 end
 Hook("TakeInboxMoney", OnMailTake)
@@ -312,7 +413,7 @@ end
 
 ns.OnInit(L.SyncMoney)
 
-ns.On("QUEST_TURNED_IN", function() Flag("quest") end)
+ns.On("QUEST_TURNED_IN", function() Flag("quest") end)  -- the only quest flag (not GetQuestReward too)
 
 -- "You loot 5 Silver, 20 Copper": money from a corpse, whether or not we saw
 -- its loot window. The chat line can arrive before or after the money change.

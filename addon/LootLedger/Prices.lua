@@ -18,11 +18,13 @@ local cache = {}
 -- 1. Blizzard snapshot (LootLedger_Prices)
 ---------------------------------------------------------------------------
 local function Feed() return type(LootLedgerPrices) == "table" and LootLedgerPrices or nil end
+-- A feed is generated, but a broken or partial one must not break the addon.
+local function FeedHouses(feed) return feed and type(feed.houses) == "table" and feed.houses or {} end
 
 local function CurrentHouse()
   local feed = Feed()
   local id = feed and P.House()
-  return id and feed.houses[id]
+  return id and FeedHouses(feed)[id]
 end
 
 ---------------------------------------------------------------------------
@@ -75,7 +77,7 @@ end
 function P.Houses()
   local feed, list = Feed(), {}
   if not feed then return list end
-  for id, h in pairs(feed.houses or {}) do list[#list + 1] = { id = id, listings = h.listings or 0 } end
+  for id, h in pairs(FeedHouses(feed)) do list[#list + 1] = { id = id, listings = h.listings or 0 } end
   table.sort(list, function(a, b) return a.listings > b.listings end)
   return list
 end
@@ -87,13 +89,14 @@ function P.House()
   local feed = Feed()
   if not feed then return nil end
   local db = ns.db
+  local houses = FeedHouses(feed)
   local chosen = db and db.house
-  if chosen and feed.houses[chosen] then return chosen, true, db.houseSource or "manual" end
+  if chosen and houses[chosen] then return chosen, true, db.houseSource or "manual" end
   -- Not known yet: guess the biggest house of the player's faction.
   local faction = UnitFactionGroup and UnitFactionGroup("player")
   local guess
   for _, h in ipairs(P.Houses()) do
-    if feed.houses[h.id].faction == faction then guess = h.id; break end
+    if houses[h.id].faction == faction then guess = h.id; break end
   end
   guess = guess or (P.Houses()[1] and P.Houses()[1].id)
   return guess, false, "guess"
@@ -104,6 +107,7 @@ function P.SetHouse(id, source)
   ns.db.house = id
   ns.db.houseSource = source or "manual"
   P.ClearCache()
+  if ns.Gathering and ns.Gathering.LockOldLoot then ns.Gathering.LockOldLoot() end
 end
 
 ns.OnInit(function()
@@ -116,10 +120,11 @@ end)
 local function FromFeed(itemID, c)
   local feed = Feed()
   local houseID = P.House()
-  local house = houseID and feed.houses[houseID]
+  local house = houseID and FeedHouses(feed)[houseID]
   local s = house and house.items and house.items[itemID]
-  if not s then return false end
+  if type(s) ~= "string" then return false end
   local market, min, qty, a7, a30 = s:match("^(%d+),(%d+),(%d+),(%d+),(%d+)$")
+  if not market then return false end  -- a line in a format we don't know
   c.market, c.recent = tonumber(market), tonumber(market)
   c.min, c.auctions = tonumber(min), tonumber(qty)
   c.avg7 = tonumber(a7) > 0 and tonumber(a7) or nil
@@ -133,7 +138,7 @@ function P.Status()
   local feed = Feed()
   if feed then
     local id, confirmed, how = P.House()
-    local h = id and feed.houses[id]
+    local h = id and FeedHouses(feed)[id]
     return { source = "blizzard", house = id, confirmed = confirmed, how = how,
       houseName = h and h.name,
       updated = h and h.updated or feed.updated, days = h and type(h.days) == "number" and h.days or 0 }
@@ -150,6 +155,7 @@ function P.StatusText()
   elseif s.source == "tsm" then
     return "AH prices from TSM."
   end
+  if not s.house then return "AH prices loaded, but they list no auction house. Update LootLedger_Prices." end
   local mins = math.floor((time() - (s.updated or 0)) / 60)
   local age = mins < 90 and (mins .. " min ago") or (mins < 2880 and (math.floor(mins / 60) .. " h ago") or (math.floor(mins / 1440) .. " days ago"))
   local which = ({ detected = " (detected at the AH)", manual = " (set by you)",
@@ -189,7 +195,7 @@ end
 function P.History(itemID)
   local feed = Feed()
   local houseID = P.House()
-  local house = houseID and feed and feed.houses[houseID]
+  local house = houseID and FeedHouses(feed)[houseID]
   local s = house and house.hist and house.hist[itemID]
   if not s then return nil end
   local cached = histCache[itemID]

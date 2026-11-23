@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { diffSnapshots, recordHour, TIME_LEFT } from "./sales.mjs";
-import { trendingLists, encodeEntry } from "./trending.mjs";
+import { trendingLists, encodeEntry, itemStats } from "./trending.mjs";
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
 const NOW = Date.parse("2026-11-30T12:00:00Z");
@@ -163,4 +163,63 @@ test("MEDIUM listings that vanish within the hour count as expired", () => {
   const d = diffSnapshots(prev, { t: HOUR, l: [] }).get(100);
   assert.equal(d.units, 0);
   assert.equal(d.expired, 20);
+});
+
+// A steady 24/day item: baseline days of 24, then a 12-hour outage, then 12 normal hours.
+function afterOutage({ withSpan }) {
+  const h = { hours: [], sales: {}, salesHours: {} };
+  for (let d = 7; d >= 2; d--) {
+    const key = new Date(NOW - d * DAY).toISOString().slice(0, 10);
+    h.sales[key] = { 2589: [24, 12, 24 * 500] };
+    h.salesHours[key] = 24;
+  }
+  const rec = (t, units, span) => ({ t, s: { 2589: [units, units, units * 500] }, q: { 2589: [100, 500] }, diff: true, ...(withSpan ? { h: span } : {}) });
+  h.hours.push(rec(NOW - 12 * HOUR, 12, 12)); // one diff over the 12 hours of outage
+  for (let i = 11; i >= 0; i--) h.hours.push(rec(NOW - i * HOUR, 1, 1));
+  return h;
+}
+
+test("A4: after an outage, sales are scaled by the hours the diffs cover, not by how many diffs there are", () => {
+  const { stats, coverage } = itemStats(afterOutage({ withSpan: true }), { 2589: { market: 500, qty: 100 } }, NOW);
+  assert.equal(coverage, 24);
+  const s = stats.get("2589");
+  assert.equal(s.sold24, 24);
+  assert.ok(s.sold24 / s.normal < 1.1, `ratio ${s.sold24 / s.normal}`);
+});
+
+test("A4: hour records without a span (written before spans were kept) count as 1 hour", () => {
+  const { coverage } = itemStats(afterOutage({ withSpan: false }), { 2589: { market: 500, qty: 100 } }, NOW);
+  assert.equal(coverage, 13);
+});
+
+test("A4: recordHour keeps the span of each diff and adds it to the day's hours covered", () => {
+  const h = {};
+  const sold = new Map([[5, { units: 12, auctions: 3, gold: 600 }]]);
+  recordHour(h, NOW, sold, { 5: { qty: 10, market: 50 } }, { span: 12 });
+  recordHour(h, NOW + HOUR, sold, { 5: { qty: 10, market: 50 } }, { span: 1 });
+  recordHour(h, NOW + 2 * HOUR, null, { 5: { qty: 10, market: 50 } });
+  assert.deepEqual(h.hours.map((x) => x.h), [12, 1, undefined]);
+  assert.equal(h.salesHours[new Date(NOW).toISOString().slice(0, 10)], 13);
+});
+
+test("A5: a LONG listing gone after a gap over 2 hours counts as expired, not bought", () => {
+  const prev = { t: 0, l: [[1, 100, 20, 50, LONG]] };
+  const d = diffSnapshots(prev, { t: 5 * HOUR, l: [] }).get(100);
+  assert.equal(d.units, 0);
+  assert.equal(d.expired, 20);
+  // ...but within a normal hour a vanished LONG listing was bought
+  assert.equal(diffSnapshots(prev, { t: HOUR, l: [] }).get(100).units, 20);
+});
+
+test("A6: baseline days with missing hours are scaled to 24 hours, like the last 24 hours are", () => {
+  const h = { hours: [], sales: {}, salesHours: {} };
+  for (let d = 7; d >= 2; d--) {
+    const key = new Date(NOW - d * DAY).toISOString().slice(0, 10);
+    h.sales[key] = { 2589: [18, 9, 18 * 500] }; // steady 1/hour, but only 18 hours of data that day
+    h.salesHours[key] = 18;
+  }
+  for (let i = 23; i >= 0; i--) h.hours.push({ t: NOW - i * HOUR, s: { 2589: [1, 1, 500] }, q: { 2589: [100, 500] }, diff: true, h: 1 });
+  const s = itemStats(h, { 2589: { market: 500, qty: 100 } }, NOW).stats.get("2589");
+  assert.equal(s.sold24, 24);
+  assert.ok(Math.abs(s.normal - 24) < 1e-9, `normal ${s.normal}`);
 });

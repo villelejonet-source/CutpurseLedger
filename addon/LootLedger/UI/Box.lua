@@ -70,7 +70,9 @@ ns.OnInit(function()
   box:SetShown(ns.ui.boxShown)
 end)
 
-ns.OnRefresh(function()
+-- Only while the box is shown (valuing loot isn't free); it catches up when shown.
+local function RefreshBox()
+  if not (ns.db and box:IsShown()) then return end
   local inc, exp = ns.Ledger.Sum("today")
   profit:SetText(ns.Signed(inc - exp))
 
@@ -92,7 +94,9 @@ ns.OnRefresh(function()
   hint:ClearAllPoints()
   hint:SetPoint("TOPLEFT", 10, -34)
   box:SetHeight(n == 0 and 52 or (36 + n * ROW_H))
-end)
+end
+ns.OnRefresh(RefreshBox)
+box:SetScript("OnShow", RefreshBox)
 
 function ns.ToggleBox()
   ns.ui.boxShown = not box:IsShown()

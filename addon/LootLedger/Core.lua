@@ -107,13 +107,14 @@ function ns.SkillRank(name)
   end
 end
 
+-- link, stack count, and whether the item has no sell value
 function ns.ContainerItem(bag, slot)
   if C_Container and C_Container.GetContainerItemInfo then
     local info = C_Container.GetContainerItemInfo(bag, slot)
-    if info then return info.hyperlink, info.stackCount end
+    if info then return info.hyperlink, info.stackCount, info.hasNoValue end
   elseif GetContainerItemInfo then
-    local _, count, _, _, _, _, link = GetContainerItemInfo(bag, slot)
-    return link, count
+    local _, count, _, _, _, _, link, _, noValue = GetContainerItemInfo(bag, slot)
+    return link, count, noValue
   end
 end
 
@@ -285,6 +286,7 @@ ns.On("PLAYER_LOGIN", function()
   local ch = acc.chars[key]
   if not ch then ch = {}; acc.chars[key] = ch end
   ch.name, ch.realm, ch.class = name, realm, select(2, UnitClass("player"))
+  ch.faction = UnitFactionGroup and UnitFactionGroup("player") or ch.faction
   -- Forever returns "" from GetRealmName; keep the key stable, but find a name to show.
   local shown = realm ~= "" and realm or (GetNormalizedRealmName and GetNormalizedRealmName()) or ""
   ch.realmLabel = shown ~= "" and shown or nil

@@ -89,8 +89,10 @@ end
 -- What a looted item is worth. Loot is valued at what YOU really get for it:
 --   1. your own recent sales of that item (after the AH cut and lost deposits),
 --   2. otherwise the AH price at the moment you looted it, after the 5% cut
---      (saved with the loot, so past days don't change when the market moves),
+--      (saved with the loot, so it doesn't follow the market), less your recent
+--      share lost on failed listings (Trade.LossRate),
 --   3. otherwise today's AH price after the cut (loot without a saved price).
+-- Past days still change when your own sale price (1) or loss rate (2) changes.
 -- See Trade.lua for how your own sale price is worked out.
 
 local function Cut() return 1 - ((ns.Advisor and ns.Advisor.SETTINGS.ahCut) or 0.05) end
@@ -101,7 +103,6 @@ function G.NetNow(id)
   local ah = p and p.hasAH and ns.Prices.AHPrice(p)
   return ah and math.floor(ah * Cut()) or nil
 end
-G.ItemWorth = G.NetNow  -- older name
 
 -- Value of n units of one item from a G.Sum result (t holds the saved loot prices).
 -- Returns value (or nil if nothing is known), info from ns.Trade.UnitValue.
@@ -197,10 +198,15 @@ end
 -- Startup and events
 ---------------------------------------------------------------------------
 -- 3.12: loot from before has no saved price. Give it today's AH price once (after
--- the cut), so it stops moving with the market from now on.
-local function LockOldLoot()
-  if ns.db.lootPricesFrom then return end
-  if not (ns.Prices and ns.Prices.Status().source ~= "none") then return end  -- try again next login
+-- the cut), so it stops moving with the market from now on. Only from a house we
+-- know is yours (detected or set): a guessed house's prices would be locked in for
+-- good. Until then lootPricesFrom stays unset, and this runs again at the next
+-- login or when the house is set (Prices.SetHouse).
+function G.LockOldLoot()
+  if not ns.db or ns.db.lootPricesFrom then return end
+  local status = ns.Prices and ns.Prices.Status()
+  if not status or status.source == "none" then return end
+  if status.source == "blizzard" and not status.confirmed then return end
   for key in pairs(ns.db.acts) do
     local b = G.Bucket(key)
     local function Lock(t)
@@ -221,7 +227,7 @@ local function LockOldLoot()
 end
 
 ns.OnInit(function()
-  LockOldLoot()
+  G.LockOldLoot()
   for _, a in ipairs(G.ACTIVITIES) do
     local n = ns.SpellName(a.spell)
     if n then spellToActivity[n] = a end
