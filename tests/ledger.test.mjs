@@ -241,3 +241,22 @@ test("B8: a post whose deposit did come is recorded once", () => {
        ADVANCE(11)`);
   assert.deepEqual(trade(), ["Posted 2589 20 60"]);
 });
+
+test("B9: a bid is logged as an AH purchase but not recorded as bought", () => {
+  const { run, log, trade } = vm();
+  run(`FIRE("AUCTION_HOUSE_SHOW")
+       C_AuctionHouse.SendSearchQuery({ itemID = 2589 })
+       C_AuctionHouse.PlaceBid(12345, 5000)
+       GAIN(-5000)`);
+  assert.deepEqual(log(), ["ah_buy -5000"]);
+  assert.deepEqual(trade(), []);
+});
+
+test("B9: commodity purchases are still recorded as bought", () => {
+  const { run, trade } = vm();
+  run(`FIRE("AUCTION_HOUSE_SHOW")
+       C_AuctionHouse.StartCommoditiesPurchase(2589, 20)
+       C_AuctionHouse.ConfirmCommoditiesPurchase(2589, 20)
+       GAIN(-1000)`);
+  assert.deepEqual(trade(), ["Bought 2589 20 1000"]);
+});

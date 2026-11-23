@@ -263,29 +263,21 @@ if C_AuctionHouse then
     local id = ItemIDAt(location)
     Flag("ah_deposit", nil, nil, id and { post = id, n = quantity or 1 }, AH_TTL)
   end
-  local lastKey  -- the item whose auctions you're looking at (for PlaceBid)
   local commodity
   local function HookAH(name, fn)
     if type(C_AuctionHouse[name]) == "function" then hooksecurefunc(C_AuctionHouse, name, fn) end
   end
   HookAH("PostItem", OnPost)
   HookAH("PostCommodity", OnPost)
-  HookAH("SendSearchQuery", function(itemKey) lastKey = itemKey end)
   HookAH("StartCommoditiesPurchase", function(itemID, quantity) commodity = { id = itemID, n = quantity } end)
   HookAH("ConfirmCommoditiesPurchase", function(itemID, quantity)
     local n = quantity or (commodity and commodity.id == itemID and commodity.n) or nil
     Flag("ah_buy", nil, n, { buy = itemID, n = n }, AH_TTL)
   end)
-  HookAH("PlaceBid", function(auctionID)
-    local id, n = lastKey and lastKey.itemID, nil
-    if lastKey and C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetItemSearchResultInfo then
-      for i = 1, C_AuctionHouse.GetNumItemSearchResults(lastKey) or 0 do
-        local r = C_AuctionHouse.GetItemSearchResultInfo(lastKey, i)
-        if r and r.auctionID == auctionID then n = r.quantity; break end
-      end
-    end
-    Flag("ah_buy", nil, n, id and { buy = id, n = n or 1 }, AH_TTL)
-  end)
+  -- A bid (or buyout) on an item auction: logged as an AH purchase, but not added
+  -- to the trade record. A bid can be outbid and refunded, and the item last
+  -- searched for isn't reliably the one bid on.
+  HookAH("PlaceBid", function() Flag("ah_buy", nil, nil, nil, AH_TTL) end)
 end
 
 -- Mail: AH sale money (with the sale details), expired/cancelled auctions, other mail.
