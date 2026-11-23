@@ -11,27 +11,29 @@ local FILTERS = {
   { key = "SELL",   label = "Sell now" },
   { key = "LIST",   label = "List" },
   { key = "HOLD",   label = "Hold" },
+  { key = "CRASH",  label = "Crashed" },
   { key = "CHECK",  label = "No price" },
   { key = "VENDOR", label = "Vendor" },
   { key = "ALL",    label = "All" },
 }
 local BADGE_COLORS = {
-  SELL = C.green, LIST = C.gold, HOLD = C.blue, CHECK = { 1, 0.6, 0.2, 1 },
+  SELL = C.green, LIST = C.gold, HOLD = C.blue, CRASH = C.red, CHECK = { 1, 0.6, 0.2, 1 },
   VENDOR = { 0.75, 0.75, 0.75, 1 }, KEEP = C.muted,
 }
 local DESCRIPTIONS = {
-  SELL = "Price is well above normal: post these on the AH now.",
+  SELL = "Post these on the AH now: the price is well above normal, falling, or buyers are going away.",
   LIST = "Normal price: fine to post at market value.",
-  HOLD = "Price is below normal: keep them and wait.",
+  HOLD = "Below normal with no sign that buyers are leaving, or the price is climbing: likely a dip, wait for it to come back.",
+  CRASH = "The price dropped hard since yesterday and there's no sales data yet to tell a dip from buyers leaving: check the AH before you hold or post.",
   CHECK = "White or better, but there's no AH price for it yet. Don't vendor these: look it up on the AH first.",
   VENDOR = "Grey junk, soulbound items, and items the AH pays less for than a vendor.",
-  ALL = "Everything you own on this realm.",
+  ALL = "Everything your characters on this auction house own. Items without an AH price count as 0 here; Net worth on Home also counts characters on other houses and vendor prices.",
 }
 
 local function Render(filter)
   local plan = A.InventoryPlan()
   local rows = { { kind = "title", icon = T.BAG_ICON, text = "Sell",
-    sub = "all your characters on this realm, right now" } }
+    sub = "characters on this auction house: bags, bank, mail" } }
 
   local sums = {}
   local worth = 0
@@ -41,7 +43,7 @@ local function Render(filter)
     worth = worth + e.total
   end
   rows[#rows + 1] = { kind = "tiles", tiles = {
-    { label = "Worth", value = ns.Money(worth) },
+    { label = "On this AH", value = ns.Money(worth) },
     { label = "Sell now", value = ns.Money(sums.SELL or 0), color = C.green },
     { label = "Vendor", value = ns.Money(sums.VENDOR or 0), color = BADGE_COLORS.VENDOR },
   } }

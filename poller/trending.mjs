@@ -105,7 +105,9 @@ function confidence(s, S) {
 export function trendingLists(history, items, now, S = TREND) {
   const { stats, coverage, baselineDays } = itemStats(history, items, now, S);
   const lists = { hot: [], climbing: [], drying: [], cooling: [] };
-  if (coverage < S.minHoursOfData || baselineDays < S.minBaselineDays) return { lists, stats, coverage, baselineDays, ready: false };
+  if (coverage < S.minHoursOfData || baselineDays < S.minBaselineDays) {
+    return { lists, stats, coverage, baselineDays, ready: false, readyAt: readyAt(history, now, S) };
+  }
 
   for (const s of stats.values()) {
     if (s.normal == null || s.normal < S.minNormalUnits || !s.market) continue;
@@ -134,6 +136,21 @@ export function trendingLists(history, items, now, S = TREND) {
   }
   for (const k of Object.keys(lists)) lists[k] = lists[k].sort((a, b) => b.score - a.score).slice(0, S.topN);
   return { lists, stats, coverage, baselineDays, ready: true };
+}
+
+// When the lists should first be ready (ms), if hourly data keeps coming: the
+// minBaselineDays-th complete day (18+ hours) counts once it is wholly before the
+// last 24 hours, i.e. from midnight UTC two days after it. Today counts if it can
+// still reach completeDayHours by midnight.
+export function readyAt(history, now, S = TREND) {
+  const hours = history.salesHours ?? {};
+  const today = dayKey(now);
+  const midnight = (key) => Date.parse(key + "T00:00:00Z");
+  const days = Object.keys(hours).filter((d) => d < today && hours[d] >= S.completeDayHours).sort();
+  const todayCan = (hours[today] ?? 0) + (midnight(today) + 24 * HOUR - now) / HOUR;
+  if (todayCan >= S.completeDayHours) days.push(today);
+  for (let t = midnight(today) + 24 * HOUR; days.length < S.minBaselineDays; t += 24 * HOUR) days.push(dayKey(t));
+  return Math.max(now, midnight(days[S.minBaselineDays - 1]) + 48 * HOUR);
 }
 
 // Compact form for the game: "id,sold24,auctions24,normal,pricePermille,supplyPermille,hoursActive,conf"

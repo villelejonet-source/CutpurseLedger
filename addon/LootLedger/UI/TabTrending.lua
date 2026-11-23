@@ -66,14 +66,29 @@ local function Reason(key, e)
   return e.sold24 .. " bought in 24h" .. normal .. (price and (" · " .. price) or "")
 end
 
+local NEED_HOURS, NEED_DAYS = 12, 2  -- as in the feed (poller/trending.mjs)
+
+-- One requirement: met (green, "done") or still filling (blue bar).
+local function Requirement(label, have, need, what)
+  local done = have >= need
+  return { kind = "row", label = label,
+    note = done and T.Color("done", C.green) or ("need " .. need .. " " .. what),
+    value = tostring(math.floor(have + 0.5)), bar = math.min(1, have / need), barColor = done and C.green or C.blue }
+end
+
 local function NotReady(t)
+  local hours, days = t and t.hoursOfData or 0, t and t.baselineDays or 0
   local rows = {}
-  rows[#rows + 1] = { kind = "note", text = "Trending needs some history first: the feed compares every hourly snapshot of your auction house to see what was actually bought." }
-  rows[#rows + 1] = { kind = "row", label = "Hours of purchase data (last 24h)", note = "need 12",
-    value = tostring(math.floor((t and t.hoursOfData or 0) + 0.5)), bar = math.min(1, (t and t.hoursOfData or 0) / 12), barColor = C.blue }
-  rows[#rows + 1] = { kind = "row", label = "Complete days to learn \"normal\"", note = "need 2",
-    value = tostring(t and t.baselineDays or 0), bar = math.min(1, (t and t.baselineDays or 0) / 2), barColor = C.blue }
-  rows[#rows + 1] = { kind = "note", text = "This fills in by itself. Keep Cutpurse Ledger Prices updated and the lists appear after about two days." }
+  rows[#rows + 1] = { kind = "note", text = "Trending needs history first: the feed compares hourly snapshots of your auction house to see what was really bought, and needs a few full days to know what \"normal\" is." }
+  rows[#rows + 1] = Requirement("Hours of purchase data, last 24h", hours, NEED_HOURS, "hours")
+  rows[#rows + 1] = Requirement("Full days to learn \"normal\"", days, NEED_DAYS, "days of 18+ hours, before the last 24h")
+  local waiting = hours < NEED_HOURS and "more hours of purchase data" or "full days of purchase data"
+  if t and t.readyAt and t.readyAt > time() then
+    rows[#rows + 1] = { kind = "note", text = "Waiting for " .. waiting .. ". The lists should appear with the first price update after "
+      .. T.Color(date("%a %d %b, %H:%M", t.readyAt), C.text) .. " (your time), if the feed keeps running every hour." }
+  else
+    rows[#rows + 1] = { kind = "note", text = "Waiting for " .. waiting .. ". This fills in by itself: keep Cutpurse Ledger Prices updated." }
+  end
   return rows
 end
 

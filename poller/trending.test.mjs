@@ -223,3 +223,21 @@ test("A6: baseline days with missing hours are scaled to 24 hours, like the last
   assert.equal(s.sold24, 24);
   assert.ok(Math.abs(s.normal - 24) < 1e-9, `normal ${s.normal}`);
 });
+
+test("readyAt: tracking that started this morning is ready at midnight UTC two days after the second full day", async () => {
+  const { readyAt } = await import("./trending.mjs");
+  const now = Date.parse("2026-11-23T20:24:00Z");
+  // today: 12 hours so far, can reach at most ~15.6 by midnight -> doesn't count
+  assert.equal(new Date(readyAt({ salesHours: { "2026-11-23": 12.01 } }, now)).toISOString(), "2026-11-27T00:00:00.000Z");
+  // today can still reach 18 hours -> it counts
+  assert.equal(new Date(readyAt({ salesHours: { "2026-11-23": 17 } }, now)).toISOString(), "2026-11-26T00:00:00.000Z");
+  // two complete days already: ready as soon as they are out of the 24h window
+  assert.equal(new Date(readyAt({ salesHours: { "2026-11-21": 24, "2026-11-22": 20 } }, now)).toISOString(), "2026-11-24T00:00:00.000Z");
+});
+
+test("trendingLists says when it will be ready, and only while it isn't", () => {
+  const h = history(SPEC);
+  assert.equal(trendingLists(h, itemsOf(SPEC), NOW).readyAt, undefined);
+  h.sales = {}; h.salesHours = {};
+  assert.ok(trendingLists(h, itemsOf(SPEC), NOW).readyAt > NOW);
+});

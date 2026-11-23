@@ -54,7 +54,7 @@ test("price down with demand steady: a dip, hold", () => {
 
 test("a sudden crash without sales data: check the AH, don't wait", () => {
   const d = decide({ market: 600 }); // 40% below normal, and below the last two days
-  assert.equal(d.action, "LIST");
+  assert.equal(d.action, "CRASH");
   assert.match(d.reason, /dropped 40% since yesterday/);
 });
 

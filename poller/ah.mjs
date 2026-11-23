@@ -242,7 +242,8 @@ for (const house of houses) {
     `    items = {\n${lines.join("\n")}\n    },\n` +
     `    hist = {\n${histLines.join("\n")}\n    },\n` +
     `    sales = {\n${salesLines.join("\n")}\n    },\n` +
-    `    trending = { ready = ${trend.ready}, hoursOfData = ${trend.coverage}, baselineDays = ${trend.baselineDays},\n      ${listLua} } },`,
+    `    trending = { ready = ${trend.ready}, hoursOfData = ${trend.coverage}, baselineDays = ${trend.baselineDays},` +
+    (trend.readyAt ? ` readyAt = ${Math.floor(trend.readyAt / 1000)},` : "") + `\n      ${listLua} } },`,
   );
   console.log(`house ${house.id} ${house.name}: ${data.listings} listings, ${lines.length} items (${histLines.length} with history), ${daysOfHistory} days of history; ` +
     `bought since last snapshot: ${sold ? soldUnits + " units" : "no comparison yet"}; trending ${trend.ready ? Object.entries(trend.lists).map(([k, l]) => `${k} ${l.length}`).join(", ") : `not ready (${trend.coverage}h, ${trend.baselineDays} baseline days)`}`);

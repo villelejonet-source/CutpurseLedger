@@ -40,3 +40,27 @@ test("prices an hour old or more: the button shows, and a click reloads the UI",
   run(`ns.reloadButton:GetScript("OnClick")(ns.reloadButton)`);
   assert.equal(get("RELOADS"), 1);
 });
+
+// Find the text of rows a tab renders (labels, notes, section titles).
+const rowsText = `(function(rows) local out = {} for _, r in ipairs(rows) do
+  out[#out + 1] = (r.kind or "") .. ":" .. tostring(r.text or r.label or "") .. "|" .. tostring(r.note or "") end
+  return table.concat(out, string.char(10)) end)`;
+
+test("trending wait screen: met requirement marked done, says what it waits for and when", () => {
+  const { run, get } = luaVM({ files: FILES, before: feedAged(20).replace("items = {} },",
+    `items = {}, trending = { ready = false, hoursOfData = 12.01, baselineDays = 0, readyAt = NOW + 2 * 86400 } },`) });
+  const text = get(`${rowsText}(ns.Views.trending("hot", nil, "all"))`);
+  assert.match(text, /row:Hours of purchase data, last 24h\|.*done/);
+  assert.match(text, /row:Full days to learn "normal"\|need 2 days/);
+  assert.match(text, /Waiting for full days of purchase data\. The lists should appear with the first price update after/);
+  assert.equal(get(`ns.GetTab("market").choices("hot")`), null, "no filter dropdown while there's nothing to filter");
+  run(`ns.OpenTab("market", "hot")`); // draws without errors
+});
+
+test("Sell tab has a Crashed list with its own description", () => {
+  const { get } = luaVM({ files: FILES, before: feedAged(20) });
+  const text = get(`${rowsText}(ns.GetTab("sell").render("CRASH"))`);
+  assert.match(text, /section:Crashed  \(0\)/);
+  assert.match(text, /dropped hard since yesterday/);
+  assert.match(get(`${rowsText}(ns.GetTab("sell").render("ALL"))`), /Net worth on Home also counts/);
+});
