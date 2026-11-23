@@ -6,6 +6,7 @@
 //         <HISTORY_DIR>/<house>.json.gz from the previous run
 // Writes: <OUT_DIR>/LootLedger_Prices/{LootLedger_Prices.toc, Prices.lua}   the data addon
 //         <OUT_DIR>/history/<house>.json.gz                                kept for the next run
+//         (every file of HISTORY_DIR is copied there first, so skipped houses keep theirs)
 //
 // Env: BNET_CLIENT_ID, BNET_CLIENT_SECRET (required)
 //      BNET_REGION (default eu), AH_RULESET (default 2 = Normal),
@@ -16,6 +17,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { dayKey } from "./analysis.mjs";
+import { carryOverHistory } from "./feed.mjs";
 import { TIME_LEFT, toSnapshot, diffSnapshots, recordHour } from "./sales.mjs";
 import { trendingLists, encodeEntry } from "./trending.mjs";
 import {
@@ -179,6 +181,8 @@ const now = Date.now();
 const accessToken = await token();
 await mkdir(join(OUT_DIR, ADDON), { recursive: true });
 await mkdir(join(OUT_DIR, "history"), { recursive: true });
+// Start from last run's history, so houses skipped below keep theirs.
+console.log(`history carried over: ${await carryOverHistory(HISTORY_DIR, join(OUT_DIR, "history"))} files`);
 
 const spd = await salesPerDay();
 console.log(`sales per day: ${Object.keys(spd).length} items`);
