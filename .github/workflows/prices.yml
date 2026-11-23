@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "40 * * * *"
   workflow_dispatch:
+    inputs:
+      curseforge:
+        description: "Also upload these prices to CurseForge now"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -57,10 +62,25 @@ jobs:
 
       - name: Publish release
         run: |
-          gh release create "${{ steps.build.outputs.tag }}" dist/*.zip \
+          gh release create "${{ steps.build.outputs.tag }}" dist/CutpurseLedger-*.zip \
             --title "${{ steps.build.outputs.title }}" \
             --notes "Cutpurse Ledger with auction house prices from $(date -u '+%Y-%m-%d %H:%M') UTC. Install or update both folders (LootLedger and LootLedger_Prices) into Interface/AddOns of your _forever_ folder." \
             --latest
+
+      # CurseForge gets the price addon every 6 hours (00, 06, 12, 18 UTC), or when asked.
+      - name: Upload prices to CurseForge
+        if: ${{ inputs.curseforge || (github.event_name == 'schedule' && (github.event.schedule == '40 * * * *')) }}
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          FORCE: ${{ inputs.curseforge }}
+        run: |
+          hour=$(date -u +%H)
+          if [ "$FORCE" != "true" ] && [ $((10#$hour % 6)) -ne 0 ]; then echo "Not a CurseForge hour ($hour UTC)"; exit 0; fi
+          if [ -z "$CF_API_KEY" ]; then echo "No CF_API_KEY secret, skipping"; exit 0; fi
+          stamp=$(date -u '+%Y-%m-%d %H:%M')
+          (cd dist/pkg && zip -qr "../CutpurseLedgerPrices-EU-$(date -u +%Y%m%d%H%M).zip" LootLedger_Prices)
+          node poller/curseforge.mjs --project 1825560 --file dist/CutpurseLedgerPrices-EU-*.zip \
+            --name "Prices $stamp UTC" --changelog "Auction house prices for every EU WoW: Forever auction house, $stamp UTC."
 
       # History lives on its own branch, replaced every run (one commit, so the repo doesn't grow).
       - name: Keep history

@@ -1,0 +1,44 @@
+name: Addon release
+
+# Uploads the Cutpurse Ledger addon to CurseForge when its version goes up
+# (## Version in addon/LootLedger/LootLedger.toc), or when started by hand.
+on:
+  push:
+    branches: [main]
+    paths: ["addon/LootLedger/**"]
+  workflow_dispatch:
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Version changed?
+        id: version
+        run: |
+          now=$(sed -n 's/^## Version: *//p' addon/LootLedger/LootLedger.toc | tr -d '\r')
+          before=$(git show HEAD~1:addon/LootLedger/LootLedger.toc 2>/dev/null | sed -n 's/^## Version: *//p' | tr -d '\r')
+          echo "version=$now" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$now" != "$before" ]; then
+            echo "upload=true" >> "$GITHUB_OUTPUT"; echo "Uploading $now (was ${before:-none})"
+          else
+            echo "upload=false" >> "$GITHUB_OUTPUT"; echo "Version unchanged ($now), nothing to upload"
+          fi
+
+      - name: Upload to CurseForge
+        if: steps.version.outputs.upload == 'true'
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist/pkg && cp -r addon/LootLedger dist/pkg/
+          (cd dist/pkg && zip -qr "../CutpurseLedger-$VERSION.zip" LootLedger)
+          node poller/curseforge.mjs --project 1825555 --file "dist/CutpurseLedger-$VERSION.zip" \
+            --name "Cutpurse Ledger $VERSION" --requires cutpurse-ledger-prices-eu \
+            --changelog "Cutpurse Ledger $VERSION. See https://github.com/${{ github.repository }}/commits/main for changes."
