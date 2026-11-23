@@ -107,6 +107,7 @@ function P.SetHouse(id, source)
   ns.db.house = id
   ns.db.houseSource = source or "manual"
   P.ClearCache()
+  if ns.Gathering and ns.Gathering.LockOldLoot then ns.Gathering.LockOldLoot() end
 end
 
 ns.OnInit(function()

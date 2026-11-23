@@ -197,10 +197,15 @@ end
 -- Startup and events
 ---------------------------------------------------------------------------
 -- 3.12: loot from before has no saved price. Give it today's AH price once (after
--- the cut), so it stops moving with the market from now on.
-local function LockOldLoot()
-  if ns.db.lootPricesFrom then return end
-  if not (ns.Prices and ns.Prices.Status().source ~= "none") then return end  -- try again next login
+-- the cut), so it stops moving with the market from now on. Only from a house we
+-- know is yours (detected or set): a guessed house's prices would be locked in for
+-- good. Until then lootPricesFrom stays unset, and this runs again at the next
+-- login or when the house is set (Prices.SetHouse).
+function G.LockOldLoot()
+  if not ns.db or ns.db.lootPricesFrom then return end
+  local status = ns.Prices and ns.Prices.Status()
+  if not status or status.source == "none" then return end
+  if status.source == "blizzard" and not status.confirmed then return end
   for key in pairs(ns.db.acts) do
     local b = G.Bucket(key)
     local function Lock(t)
@@ -221,7 +226,7 @@ local function LockOldLoot()
 end
 
 ns.OnInit(function()
-  LockOldLoot()
+  G.LockOldLoot()
   for _, a in ipairs(G.ACTIVITIES) do
     local n = ns.SpellName(a.spell)
     if n then spellToActivity[n] = a end
