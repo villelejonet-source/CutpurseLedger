@@ -1,0 +1,42 @@
+// The window header (UI/Window.lua): a "Reload for newer prices" button once the
+// loaded prices are an hour old, since WoW reads new price files only on /reload.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { luaVM, ADDON } from "./harness.mjs";
+
+// Every file in .toc order, so the window has its real tabs.
+const FILES = fs.readFileSync(path.join(ADDON, "LootLedger.toc"), "utf8")
+  .split(/\r?\n/).filter((l) => l.endsWith(".lua")).map((l) => l.replace(/\\/g, "/"));
+
+const feedAged = (mins) => `
+  LootLedgerPrices = { updated = NOW - ${mins} * 60, spd = {}, houses = {
+    [113] = { name = "Horde", faction = "Horde", updated = NOW - ${mins} * 60, listings = 10, items = {} },
+  } }
+  RELOADS = 0
+  ReloadUI = function() RELOADS = RELOADS + 1 end
+  SlashCmdList = {}
+  StaticPopupDialogs = {}
+  StaticPopup_Show = function() end
+  -- WoW's Lua extras the UI files use
+  tinsert, tremove = table.insert, table.remove
+  wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
+  strsplit = function(sep, s) local out = {} for p in (s .. sep):gmatch("(.-)" .. sep) do out[#out + 1] = p end return unpack(out) end
+  UISpecialFrames = {}
+  IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown = function() return false end, function() return false end, function() return false end
+`;
+
+test("prices under an hour old: no reload button", () => {
+  const { run, get } = luaVM({ files: FILES, before: feedAged(20) });
+  run(`ns.OpenTab("home")`);
+  assert.equal(get("ns.reloadButton:IsShown()"), false);
+});
+
+test("prices an hour old or more: the button shows, and a click reloads the UI", () => {
+  const { run, get } = luaVM({ files: FILES, before: feedAged(75) });
+  run(`ns.OpenTab("home")`);
+  assert.equal(get("ns.reloadButton:IsShown()"), true);
+  run(`ns.reloadButton:GetScript("OnClick")(ns.reloadButton)`);
+  assert.equal(get("RELOADS"), 1);
+});

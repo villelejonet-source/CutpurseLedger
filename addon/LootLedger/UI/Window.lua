@@ -88,6 +88,24 @@ close:SetScript("OnEnter", function() closeText:SetTextColor(C.text[1], C.text[2
 close:SetScript("OnLeave", function() closeText:SetTextColor(C.muted[1], C.muted[2], C.muted[3]) end)
 close:SetScript("OnClick", function() win:Hide() end)
 
+-- WoW reads new price files only at login or /reload. Once the loaded prices are an
+-- hour old, an updater (CurseForge app, update script) may have newer ones on disk:
+-- offer a one-click reload. Addons can't look at the disk, so it can't know for sure.
+local RELOAD_AFTER_MIN = 60
+local reload = T.Button(header, "Reload for newer prices", "chip", function() ReloadUI() end)
+reload:SetSize(150, 20)
+reload:SetPoint("RIGHT", close, "LEFT", -6, 0)
+reload:Hide()
+reload:HookScript("OnEnter", function(self)
+  GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+  GameTooltip:AddLine("Reload the interface")
+  GameTooltip:AddLine("WoW loads new AH prices only at login or /reload. If your", 0.8, 0.8, 0.8)
+  GameTooltip:AddLine("updater downloaded newer prices, this loads them.", 0.8, 0.8, 0.8)
+  GameTooltip:Show()
+end)
+reload:HookScript("OnLeave", function() GameTooltip:Hide() end)
+ns.reloadButton = reload
+
 -- Footer
 local footer = win:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 footer:SetPoint("BOTTOMLEFT", PAD, 10)
@@ -695,8 +713,9 @@ local function Subtitle()
   if not ns.db then return end
   local text = ns.db.name .. (ns.db.realmLabel and ("  ·  " .. ns.db.realmLabel) or "")
   local s = ns.Prices.Status()
-  if s.source == "blizzard" and s.updated then
-    local mins = math.max(0, math.floor((time() - s.updated) / 60))
+  local mins = s.source == "blizzard" and s.updated and math.max(0, math.floor((time() - s.updated) / 60))
+  reload:SetShown(mins and mins >= RELOAD_AFTER_MIN or false)
+  if mins then
     local age = mins < 90 and (mins .. " min") or (mins < 2880 and (math.floor(mins / 60) .. " h") or (math.floor(mins / 1440) .. " days"))
     local color = mins > 360 and "|cffff6b6b" or (mins > 120 and "|cffffd100" or "")
     text = text .. "  ·  " .. color .. "prices " .. age .. " old" .. (color ~= "" and "|r" or "")

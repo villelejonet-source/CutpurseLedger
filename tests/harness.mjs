@@ -44,6 +44,12 @@ RepairAllItems = function() end
 -- SetText, ...) do nothing and return another such object.
 MAGIC = {}
 MAGIC.__index = function() return function() return setmetatable({}, MAGIC) end end
+-- Sizes and widths read back from widgets act as 0, text as "".
+local function Zero() return 0 end
+MAGIC.__add, MAGIC.__sub, MAGIC.__mul, MAGIC.__div, MAGIC.__unm, MAGIC.__mod = Zero, Zero, Zero, Zero, Zero, Zero
+MAGIC.__concat = function(a, b) return (type(a) == "table" and "" or tostring(a)) .. (type(b) == "table" and "" or tostring(b)) end
+MAGIC.__lt = function() return false end
+MAGIC.__le = function() return true end
 UIParent = setmetatable({}, MAGIC)
 GameTooltip = setmetatable({}, MAGIC)
 local FrameMethods = {
