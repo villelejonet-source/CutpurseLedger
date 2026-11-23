@@ -1,4 +1,4 @@
--- Loot Ledger: advisor
+-- Cutpurse Ledger: advisor
 -- One decision per item: SELL now, HOLD for a better price, LIST at the normal
 -- price, or VENDOR it. Every decision comes with a short reason.
 --

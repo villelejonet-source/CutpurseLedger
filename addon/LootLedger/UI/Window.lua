@@ -1,4 +1,4 @@
--- Loot Ledger: main window
+-- Cutpurse Ledger: main window
 -- Tabs are registered from other files with ns.RegisterTab, so new tabs can be
 -- added without touching this file:
 --
@@ -66,7 +66,7 @@ logo:SetPoint("LEFT", 12, 0)
 logo:SetTexture(T.GOLD_ICON)
 local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 title:SetPoint("TOPLEFT", logo, "TOPRIGHT", 10, 1)
-title:SetText("Loot Ledger")
+title:SetText("Cutpurse Ledger")
 local subtitle = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2)
 subtitle:SetTextColor(C.muted[1], C.muted[2], C.muted[3])
@@ -85,7 +85,7 @@ close:SetScript("OnClick", function() win:Hide() end)
 -- Footer
 local footer = win:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 footer:SetPoint("BOTTOMLEFT", PAD, 10)
-footer:SetText("Session = since you logged in  ·  /ll session starts a new one")
+footer:SetText("Session = since you logged in  ·  /cl session starts a new one")
 
 -- Scrollable body
 local scroll = CreateFrame("ScrollFrame", nil, win)

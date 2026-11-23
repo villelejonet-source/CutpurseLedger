@@ -1,4 +1,4 @@
--- Loot Ledger: prices
+-- Cutpurse Ledger: prices
 -- One place to ask "what is this item worth?".
 --
 -- Sources, best first:
@@ -47,7 +47,7 @@ function P.House()
   return guess, false, "guess"
 end
 
--- source: "manual" (/ll house) or "detected" (matched at the AH)
+-- source: "manual" (/cl house) or "detected" (matched at the AH)
 function P.SetHouse(id, source)
   ns.db.house = id
   ns.db.houseSource = source or "manual"

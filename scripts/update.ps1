@@ -1,4 +1,4 @@
-# Loot Ledger updater for Windows, for players who don't use an addon manager.
+# Cutpurse Ledger updater for Windows, for players who don't use an addon manager.
 # Downloads the latest release (addon + fresh prices) and installs it into your
 # WoW: Forever AddOns folder. Nothing else is needed: no git, no account.
 #
@@ -7,7 +7,7 @@
 
 param(
   [string]$AddOns = "",
-  [string]$Repo = "villelejonet-source/LootLedger"
+  [string]$Repo = "villelejonet-source/CutpurseLedger"
 )
 $ErrorActionPreference = "Stop"
 
@@ -29,11 +29,11 @@ if (-not $AddOns) {
   if (-not $AddOns) { throw "Couldn't find WoW: Forever. Run again with -AddOns ""<your _forever_\Interface\AddOns folder>""" }
 }
 
-$release = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest" -Headers @{ "User-Agent" = "LootLedger-updater" }
+$release = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest" -Headers @{ "User-Agent" = "CutpurseLedger-updater" }
 $asset = $release.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
 if (-not $asset) { throw "The latest release has no zip file." }
 
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("LootLedger-" + [guid]::NewGuid())
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("CutpurseLedger-" + [guid]::NewGuid())
 New-Item -ItemType Directory $tmp | Out-Null
 try {
   $zip = Join-Path $tmp $asset.name

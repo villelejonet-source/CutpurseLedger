@@ -1,9 +1,9 @@
--- Loot Ledger: Market tab. Price history and trend for one item:
+-- Cutpurse Ledger: Market tab. Price history and trend for one item:
 -- how it moves day to day / week to week / month to month, which weekdays it
 -- is cheapest and most expensive, and what to do about it.
 --
 -- Open it: Alt+click an item in your bags, click an item row in any tab, or
--- /ll market <item link or name>.
+-- /cl market <item link or name>.
 
 local ADDON, ns = ...
 local T = ns.Theme
@@ -64,7 +64,7 @@ end
 local function Empty()
   local rows = {
     { kind = "title", icon = T.GOLD_ICON, text = "Market", sub = "price history for one item" },
-    { kind = "note", text = "Alt+click an item in your bags, click an item row in Inventory, Gathering or the Gold log, or type /ll market and shift-click an item into the chat line." },
+    { kind = "note", text = "Alt+click an item in your bags, click an item row in Inventory, Gathering or the Gold log, or type /cl market and shift-click an item into the chat line." },
   }
   local recent = ns.ui.marketRecent or {}
   if #recent > 0 then

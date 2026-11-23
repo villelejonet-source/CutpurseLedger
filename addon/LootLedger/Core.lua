@@ -1,4 +1,4 @@
--- Loot Ledger: core
+-- Cutpurse Ledger: core
 -- Shared helpers, saved data, a small event bus and startup. Every other file
 -- gets the same namespace table `ns` and adds its own part to it.
 
@@ -51,7 +51,7 @@ function ns.Gold(s) return "|cffffd100" .. s .. "|r" end
 function ns.Grey(s) return "|cff999999" .. s .. "|r" end
 
 function ns.Print(msg)
-  DEFAULT_CHAT_FRAME:AddMessage("|cffffd100Loot Ledger:|r " .. msg)
+  DEFAULT_CHAT_FRAME:AddMessage("|cffffd100Cutpurse Ledger:|r " .. msg)
 end
 
 function ns.SpellName(id)
@@ -139,7 +139,7 @@ for _, p in ipairs(ns.PERIODS) do PERIOD_BY_KEY[p.key] = p end
 -- Number of calendar days in a period (nil for session / all time).
 function ns.PeriodDays(period) return PERIOD_BY_KEY[period] and PERIOD_BY_KEY[period].days end
 
--- Session = since you logged in (or typed /ll session).
+-- Session = since you logged in (or typed /cl session).
 ns.sessionStart = GetTime()      -- for durations
 ns.sessionStartTime = time()     -- for timestamps
 local sessionResets = {}
@@ -174,7 +174,7 @@ function ns.PeriodTitle(period, firstDay)
   elseif period == "today" then
     return "Today", date("%A ") .. ShortDate(time())
   elseif period == "all" then
-    return "All time", firstDay and ("since " .. firstDay) or "since Loot Ledger was installed"
+    return "All time", firstDay and ("since " .. firstDay) or "since Cutpurse Ledger was installed"
   end
   local days = ns.PeriodDays(period)
   return "Last " .. days .. " days", ShortDate(ns.DayStart(days - 1)) .. " - " .. ShortDate(time())
@@ -267,7 +267,7 @@ ns.On("PLAYER_LOGIN", function()
   ch.ledger = ch.ledger or { days = {}, recent = {} }
   ns.db = ch
 
-  -- Move data from Loot Ledger 2.x (stored per character) into the account-wide store.
+  -- Move data from version 2.x (stored per character) into the account-wide store.
   local v2 = LootLedgerDB
   if v2 and v2.acts then
     for k, b in pairs(v2.acts) do

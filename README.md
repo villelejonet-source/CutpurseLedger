@@ -1,4 +1,4 @@
-# Loot Ledger
+# Cutpurse Ledger
 
 A gold ledger, pickpocket and gathering tracker, and auction house advisor for **WoW: Forever**, with auction house prices that update automatically every hour.
 
@@ -12,7 +12,7 @@ Region: **EU** (US planned). Rule set: **Normal**.
 
 ## Install
 
-Loot Ledger is two folders that go into `World of Warcraft\_forever_\Interface\AddOns\`:
+Cutpurse Ledger is two folders that go into `World of Warcraft\_forever_\Interface\AddOns\`:
 
 | Folder | What it is |
 |---|---|
@@ -39,14 +39,14 @@ Prices load when the game starts (or on `/reload`).
 
 | Command | |
 |---|---|
-| `/ll` | open the window (Overview, Gold log, Inventory, Gathering, Market) |
+| `/cutpurse` or `/cl` | open the window (Overview, Gold log, Inventory, Gathering, Market) |
 | Alt+click an item | its price history and advice |
-| `/ll sell` | what to sell on the AH right now |
-| `/ll house` | which auction house your prices come from |
-| `/ll house auto` | detect it automatically (default) |
-| `/ll box` | show/hide the small "today" box |
+| `/cl sell` | what to sell on the AH right now |
+| `/cl house` | which auction house your prices come from |
+| `/cl house auto` | detect it automatically (default) |
+| `/cl box` | show/hide the small "today" box |
 
-**Your auction house is detected automatically** the first time you open the AH on a character (a few quick searches, about 10 seconds). Until then Loot Ledger uses the biggest house of your faction.
+**Your auction house is detected automatically** the first time you open the AH on a character (a few quick searches, about 10 seconds). Until then Cutpurse Ledger uses the biggest house of your faction.
 
 ## How prices work
 
@@ -60,14 +60,14 @@ The feed is in [`poller/`](poller); `node --test poller/analysis.test.mjs poller
 
 ## Privacy
 
-Loot Ledger sends nothing anywhere. Your gold log and inventory stay in WoW's saved variables on your PC.
+Cutpurse Ledger sends nothing anywhere. Your gold log and inventory stay in WoW's saved variables on your PC.
 
 ## Credits
 
 - Auction data: Blizzard Entertainment's World of Warcraft API.
 - Region-wide sales per day: [Saddlebag Exchange](https://saddlebagexchange.com).
 
-Loot Ledger is a fan project, not affiliated with or endorsed by Blizzard Entertainment. World of Warcraft is a trademark of Blizzard Entertainment.
+Cutpurse Ledger is a fan project, not affiliated with or endorsed by Blizzard Entertainment. World of Warcraft is a trademark of Blizzard Entertainment.
 
 ## License
 

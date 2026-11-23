@@ -1,4 +1,4 @@
--- Loot Ledger: Overview tab.
+-- Cutpurse Ledger: Overview tab.
 -- Period heading, three big numbers (earned / spent / profit), where the money
 -- came from and went (with bars), then "right now" gold and item worth.
 

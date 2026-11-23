@@ -1,4 +1,4 @@
--- Loot Ledger: find out which auction house this character uses.
+-- Cutpurse Ledger: find out which auction house this character uses.
 --
 -- The price data covers every auction house of the region, and the game doesn't
 -- say which one you're standing at. So when the AH opens, we ask it about a few
@@ -76,7 +76,7 @@ local function Finish()
 
   local current, _, how = P.House()
   if how == "manual" and current ~= best.id then
-    ns.Print(("This AH looks like house %d, but you set house %d. Type /ll house %d to switch."):format(best.id, current, best.id))
+    ns.Print(("This AH looks like house %d, but you set house %d. Type /cl house %d to switch."):format(best.id, current, best.id))
     return
   end
   if current ~= best.id or how ~= "detected" then

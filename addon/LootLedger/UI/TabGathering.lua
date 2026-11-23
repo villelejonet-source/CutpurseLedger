@@ -1,4 +1,4 @@
--- Loot Ledger: Gathering tab. "Summary" compares all activities for the
+-- Cutpurse Ledger: Gathering tab. "Summary" compares all activities for the
 -- chosen period; each activity filter shows the details.
 
 local ADDON, ns = ...

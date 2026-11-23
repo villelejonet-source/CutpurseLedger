@@ -1,4 +1,4 @@
--- Loot Ledger: gathering
+-- Cutpurse Ledger: gathering
 -- When you cast a tracked spell (Pick Pocket, Skinning, ...), the next loot
 -- window belongs to that activity. Money and items received while it is open
 -- (plus a short grace period, for auto-loot) are credited to it.

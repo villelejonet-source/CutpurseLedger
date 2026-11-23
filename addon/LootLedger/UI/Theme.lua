@@ -1,4 +1,4 @@
--- Loot Ledger: look and feel. Colors, icons and small widget factories shared
+-- Cutpurse Ledger: look and feel. Colors, icons and small widget factories shared
 -- by the window and the box. Everything is drawn with flat color textures so
 -- it looks the same on every client.
 

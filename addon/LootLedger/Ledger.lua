@@ -1,4 +1,4 @@
--- Loot Ledger: gold log
+-- Cutpurse Ledger: gold log
 -- Every change in your money is recorded and labelled by what you were doing at
 -- that moment: the window you had open (vendor, mailbox, AH, trainer, ...) or the
 -- action you just took (Repair All, taking money from a mail, ...).

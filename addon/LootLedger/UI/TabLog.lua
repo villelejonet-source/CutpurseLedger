@@ -1,4 +1,4 @@
--- Loot Ledger: Gold log tab. Every gold movement in the chosen period,
+-- Cutpurse Ledger: Gold log tab. Every gold movement in the chosen period,
 -- grouped by day (with each day's profit), newest first.
 
 local ADDON, ns = ...

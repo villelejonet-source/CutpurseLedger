@@ -1,4 +1,4 @@
--- Loot Ledger: vendor guard
+-- Cutpurse Ledger: vendor guard
 -- If you sell something white or better to a vendor while the AH would pay
 -- more, a popup tells you what you'd get on the AH and offers to buy it back.
 --

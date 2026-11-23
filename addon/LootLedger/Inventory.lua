@@ -1,4 +1,4 @@
--- Loot Ledger: inventory
+-- Cutpurse Ledger: inventory
 -- What each character owns, by place (bags, bank, mail). Bags are rescanned
 -- whenever they change; bank and mail only while those windows are open, so
 -- their counts are "as of the last visit".

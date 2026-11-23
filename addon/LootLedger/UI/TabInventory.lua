@@ -1,4 +1,4 @@
--- Loot Ledger: Inventory tab. Everything you own on this realm (all
+-- Cutpurse Ledger: Inventory tab. Everything you own on this realm (all
 -- characters, bags + bank + mail), each with the advisor's decision.
 
 local ADDON, ns = ...

@@ -1,4 +1,4 @@
--- Loot Ledger: the small draggable box. Everything in it is for TODAY:
+-- Cutpurse Ledger: the small draggable box. Everything in it is for TODAY:
 -- today's profit, then what each activity brought in today.
 
 local ADDON, ns = ...
@@ -56,7 +56,7 @@ box:SetScript("OnMouseUp", function(self, button)
 end)
 box:SetScript("OnEnter", function(self)
   GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-  GameTooltip:AddLine("Loot Ledger: today")
+  GameTooltip:AddLine("Cutpurse Ledger: today")
   GameTooltip:AddLine("Top right: today's profit (earned minus spent).", 0.8, 0.8, 0.8)
   GameTooltip:AddLine("Below: what each activity brought in today.", 0.8, 0.8, 0.8)
   GameTooltip:AddLine("Click to open. Drag to move.", 0.6, 0.6, 0.6)

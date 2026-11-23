@@ -1,7 +1,7 @@
 name: Prices
 
 # Every hour: read the WoW: Forever auction houses from Blizzard's API, update the
-# price history, and publish a GitHub Release with Loot Ledger + fresh prices.
+# price history, and publish a GitHub Release with Cutpurse Ledger + fresh prices.
 # Blizzard refreshes the houses around :23, so this runs at :40.
 on:
   schedule:
@@ -51,15 +51,15 @@ jobs:
           stamp=$(date -u +%Y%m%d%H%M)
           mkdir -p dist/pkg
           cp -r addon/LootLedger out/LootLedger_Prices dist/pkg/
-          (cd dist/pkg && zip -qr "../LootLedger-$version-$stamp.zip" LootLedger LootLedger_Prices)
+          (cd dist/pkg && zip -qr "../CutpurseLedger-$version-$stamp.zip" LootLedger LootLedger_Prices)
           echo "tag=v$version-$stamp" >> "$GITHUB_OUTPUT"
-          echo "title=Loot Ledger $version · prices $(date -u '+%Y-%m-%d %H:%M') UTC" >> "$GITHUB_OUTPUT"
+          echo "title=Cutpurse Ledger $version · prices $(date -u '+%Y-%m-%d %H:%M') UTC" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
         run: |
           gh release create "${{ steps.build.outputs.tag }}" dist/*.zip \
             --title "${{ steps.build.outputs.title }}" \
-            --notes "Loot Ledger with auction house prices from $(date -u '+%Y-%m-%d %H:%M') UTC. Install or update both folders (LootLedger and LootLedger_Prices) into Interface/AddOns of your _forever_ folder." \
+            --notes "Cutpurse Ledger with auction house prices from $(date -u '+%Y-%m-%d %H:%M') UTC. Install or update both folders (LootLedger and LootLedger_Prices) into Interface/AddOns of your _forever_ folder." \
             --latest
 
       # History lives on its own branch, replaced every run (one commit, so the repo doesn't grow).

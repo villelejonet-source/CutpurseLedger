@@ -1,11 +1,13 @@
--- Loot Ledger: slash commands.
+-- Cutpurse Ledger: slash commands.
 
 local ADDON, ns = ...
 local G = ns.Gathering
 
-SLASH_LOOTLEDGER1 = "/ll"
-SLASH_LOOTLEDGER2 = "/lootledger"
-SLASH_LOOTLEDGER3 = "/pp"
+SLASH_LOOTLEDGER1 = "/cutpurse"
+SLASH_LOOTLEDGER2 = "/cl"
+SLASH_LOOTLEDGER3 = "/ll"          -- old name, kept so existing habits work
+SLASH_LOOTLEDGER4 = "/lootledger"
+SLASH_LOOTLEDGER5 = "/pp"
 SlashCmdList.LOOTLEDGER = function(msg)
   local raw = msg or ""  -- original text, item links intact
   msg = raw:lower():match("^%s*(.-)%s*$")
@@ -18,9 +20,9 @@ SlashCmdList.LOOTLEDGER = function(msg)
   elseif G.BY_KEY[msg] or msg == "gathering" then
     ns.OpenTab("gathering", G.BY_KEY[msg] and msg)
   elseif msg:match("^market") then
-    -- /ll market            -> open the tab
-    -- /ll market <link>     -> that item (shift-click an item into the chat line)
-    -- /ll market <name>     -> first item you've owned whose name contains the text
+    -- /cl market            -> open the tab
+    -- /cl market <link>     -> that item (shift-click an item into the chat line)
+    -- /cl market <name>     -> first item you've owned whose name contains the text
     local id = tonumber(raw:match("item:(%d+)"))
     local query = msg:match("^market%s+(.+)$")
     if not id and query then
@@ -31,9 +33,9 @@ SlashCmdList.LOOTLEDGER = function(msg)
     end
     if id then ns.OpenMarket(id) else ns.OpenTab("market") end
   elseif msg:match("^house") then
-    -- /ll house          list the houses and which one this character uses
-    -- /ll house <id>     use that house (stops automatic detection for this character)
-    -- /ll house auto     go back to automatic detection (next time the AH opens)
+    -- /cl house          list the houses and which one this character uses
+    -- /cl house <id>     use that house (stops automatic detection for this character)
+    -- /cl house auto     go back to automatic detection (next time the AH opens)
     local arg = msg:match("^house%s+(%S+)")
     local id = tonumber(arg or "")
     local houses = ns.Prices.Houses()
@@ -51,9 +53,9 @@ SlashCmdList.LOOTLEDGER = function(msg)
       if ok then
         ns.Prices.SetHouse(id, "manual")
         ns.Refresh()
-        ns.Print("This character now uses auction house " .. id .. " for prices. (/ll house auto to detect it instead.)")
+        ns.Print("This character now uses auction house " .. id .. " for prices. (/cl house auto to detect it instead.)")
       else
-        ns.Print("House " .. id .. " isn't in the price data. Type /ll house to see the options.")
+        ns.Print("House " .. id .. " isn't in the price data. Type /cl house to see the options.")
       end
     else
       local current, _, how = ns.Prices.House()
@@ -71,7 +73,7 @@ SlashCmdList.LOOTLEDGER = function(msg)
         DEFAULT_CHAT_FRAME:AddMessage(("  |cffffd100%d|r %s%s  %s"):format(h.id, info.name or "", h.id == current and " |cff5cdc75(this character)|r" or "",
           table.concat(parts, ",  ")))
       end
-      DEFAULT_CHAT_FRAME:AddMessage("  /ll house <number> to set it yourself, /ll house auto to detect it at the AH.")
+      DEFAULT_CHAT_FRAME:AddMessage("  /cl house <number> to set it yourself, /cl house auto to detect it at the AH.")
     end
   elseif msg == "box" then
     ns.ToggleBox()
@@ -86,6 +88,6 @@ SlashCmdList.LOOTLEDGER = function(msg)
     ns.Refresh()
     ns.Print("Everything on this character reset.")
   else
-    ns.Print("/ll  open · /ll overview | log | inventory | sell | gathering | skinning | pickpocket | mining | herbalism · /ll market [item] · /ll house · /ll box · /ll session · /ll reset")
+    ns.Print("/cl  open · /cl overview | log | inventory | sell | gathering | skinning | pickpocket | mining | herbalism · /cl market [item] · /cl house · /cl box · /cl session · /cl reset")
   end
 end

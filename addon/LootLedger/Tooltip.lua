@@ -1,4 +1,4 @@
--- Loot Ledger: item tooltips get the advice, the AH prices behind it, and how
+-- Cutpurse Ledger: item tooltips get the advice, the AH prices behind it, and how
 -- many you own.
 
 local ADDON, ns = ...
@@ -11,7 +11,7 @@ end
 local function AddLines(tooltip, id, needsShow)
   if not (ns.db and id) then return end
   local d = ns.Advisor.Decide(id)
-  tooltip:AddDoubleLine("Loot Ledger: " .. ns.Advisor.Tag(d.action), d.reason, 1, 0.82, 0, 1, 1, 1)
+  tooltip:AddDoubleLine("Cutpurse Ledger: " .. ns.Advisor.Tag(d.action), d.reason, 1, 0.82, 0, 1, 1, 1)
 
   -- Prices
   local p = ns.Prices.Get(id)
