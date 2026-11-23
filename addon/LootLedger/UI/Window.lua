@@ -242,6 +242,7 @@ function MAKE.row()
 end
 HEIGHTS.row = 24
 local function DrawRow(f, r, index)
+  f.hover:Hide()  -- rows are reused: a redraw (scroll, refresh) mustn't keep the old highlight
   f.stripe:SetShown(index % 2 == 1)
   f.itemID = r.itemID
   f:EnableMouse(r.itemID ~= nil)
