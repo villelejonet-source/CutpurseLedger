@@ -40,6 +40,23 @@ local function AddLines(tooltip, id, needsShow)
       Row(tooltip, "Best day to sell", ns.Prices.DayList(wk.best) .. Grey(string.format("  (%+d%%)", math.floor(wk.bestPct * 100 + 0.5))))
     end
     if p.soldPerDay then Row(tooltip, "Sells per day (EU)", tostring(p.soldPerDay)) end
+    local sales = ns.Prices.Sales(id)
+    if sales and sales.sold24 > 0 then
+      Row(tooltip, "Bought last 24h", sales.sold24 .. (sales.normal and Grey("  (normal ~" .. sales.normal .. ")") or ""))
+    end
+    local trend = ns.Prices.Trending()
+    local tr = trend and trend.byItem[id]
+    if tr then
+      local names = { hot = "selling fast", climbing = "price climbing", drying = "drying up", cooling = "cooling off" }
+      Row(tooltip, "Trending", "|cff5cdc75" .. (names[tr.list] or tr.list) .. "|r")
+    end
+  end
+
+  -- Quests that need it (via Questie)
+  local quests = ns.Quests and ns.Quests.For(id)
+  if quests then
+    local q = quests[1]
+    Row(tooltip, "Quest item", q.name .. Grey(" (" .. q.level .. ")" .. (#quests > 1 and (" +" .. (#quests - 1) .. " more") or "")))
   end
 
   -- What you own, and what it would bring in

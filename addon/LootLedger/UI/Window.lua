@@ -5,8 +5,9 @@
 --   ns.RegisterTab({
 --     key = "market", label = "Market",
 --     periods = true,                                 -- optional: show the period row
---     subtabs = { { key = "a", label = "A" }, ... },  -- optional: show a filter row
---     render = function(subKey, period) return rows end,
+--     subtabs = { { key = "a", label = "A" }, ... },  -- optional: show a row of subtabs
+--     filters = { { key = "f", label = "F" }, ... },  -- optional: a second, smaller row of filters
+--     render = function(subKey, period, filterKey) return rows end,
 --   })
 --
 -- render returns a list of row specs, drawn top to bottom:
@@ -30,12 +31,14 @@ local BODY_W = WIDTH - PAD * 2
 local tabs, tabByKey = {}, {}
 local mainTab
 local selectedSub = {}       -- tab key -> selected subtab key
-local mainButtons, subButtons, periodButtons = {}, {}, {}
+local selectedFilter = {}    -- tab key -> selected filter key
+local mainButtons, subButtons, periodButtons, filterButtons = {}, {}, {}, {}
 
 function ns.RegisterTab(tab)
   tabs[#tabs + 1] = tab
   tabByKey[tab.key] = tab
   if tab.subtabs then selectedSub[tab.key] = tab.subtabs[1].key end
+  if tab.filters then selectedFilter[tab.key] = tab.filters[1].key end
   mainTab = mainTab or tab.key
 end
 function ns.GetTab(key) return tabByKey[key] end
@@ -553,6 +556,13 @@ local function Build()
         ns.Refresh()
       end)
     end
+    if tab.filters then
+      filterButtons[tab.key] = Row(tab.filters, "chip", 18, 0, function(key)
+        selectedFilter[tab.key] = key
+        scroll:SetVerticalScroll(0)
+        ns.Refresh()
+      end)
+    end
   end
 end
 
@@ -577,11 +587,16 @@ ns.OnRefresh(function()
     for subKey, b in pairs(subs) do b:SetSelected(subKey == selectedSub[key]) end
   end
   if tab.subtabs then y = y - 26 end
+  for key, filters in pairs(filterButtons) do
+    Place(filters, y, key == mainTab)
+    for fKey, b in pairs(filters) do b:SetSelected(fKey == selectedFilter[key]) end
+  end
+  if tab.filters then y = y - 24 end
 
   scroll:ClearAllPoints()
   scroll:SetPoint("TOPLEFT", PAD, y - 6)
   scroll:SetPoint("BOTTOMRIGHT", -PAD, 28)
-  Draw(tab.render(selectedSub[mainTab], ns.ui.period))
+  Draw(tab.render(selectedSub[mainTab], ns.ui.period, selectedFilter[mainTab]))
 end)
 
 win:SetScript("OnShow", function() ns.Refresh() end)

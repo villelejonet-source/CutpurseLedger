@@ -14,7 +14,7 @@ jobs:
         with:
           node-version: 24
       - name: Feed tests
-        run: node --test poller/analysis.test.mjs poller/history.test.mjs
+        run: node --test poller/*.test.mjs
       - name: Lua syntax (addon)
         run: |
           npm install --silent --no-save luaparse@0.3.1

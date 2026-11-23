@@ -19,6 +19,58 @@ local cache = {}
 ---------------------------------------------------------------------------
 local function Feed() return type(LootLedgerPrices) == "table" and LootLedgerPrices or nil end
 
+local function CurrentHouse()
+  local feed = Feed()
+  local id = feed and P.House()
+  return id and feed.houses[id]
+end
+
+---------------------------------------------------------------------------
+-- Purchases and trending (from the feed's sales / trending tables)
+---------------------------------------------------------------------------
+-- { sold24, normal (nil if not known yet), auctions24 } or nil
+function P.Sales(itemID)
+  local h = CurrentHouse()
+  local s = h and h.sales and h.sales[itemID]
+  if not s then return nil end
+  local sold, normal, auctions = s:match("^(%d+),(%-?%d+),(%d+)$")
+  if not sold then return nil end
+  normal = tonumber(normal)
+  return { sold24 = tonumber(sold), normal = normal >= 0 and normal or nil, auctions24 = tonumber(auctions) }
+end
+
+P.TREND_LISTS = { "hot", "climbing", "drying", "cooling" }
+
+local trendCache
+-- { ready, hoursOfData, baselineDays, lists = { hot = { entry... }, ... }, byItem = { [id] = { list, entry } } }
+-- entry = { id, sold24, auctions24, normal, priceChange, supplyChange, hoursActive, conf }
+function P.Trending()
+  local h = CurrentHouse()
+  local t = h and h.trending
+  if not t then return nil end
+  if trendCache and trendCache.src == t then return trendCache end
+  local out = { src = t, ready = t.ready, hoursOfData = t.hoursOfData or 0, baselineDays = t.baselineDays or 0, lists = {}, byItem = {} }
+  for _, key in ipairs(P.TREND_LISTS) do
+    local list = {}
+    for _, s in ipairs(t[key] or {}) do
+      local f = {}
+      for v in (s .. ","):gmatch("([^,]*),") do f[#f + 1] = v end
+      local pm = function(v) return v ~= "" and tonumber(v) / 1000 or nil end
+      local e = {
+        id = tonumber(f[1]), sold24 = tonumber(f[2]), auctions24 = tonumber(f[3]), normal = tonumber(f[4]),
+        priceChange = pm(f[5] or ""), supplyChange = pm(f[6] or ""), hoursActive = tonumber(f[7]), conf = tonumber(f[8]) or 0,
+      }
+      if e.id then
+        list[#list + 1] = e
+        out.byItem[e.id] = out.byItem[e.id] or { list = key, entry = e }
+      end
+    end
+    out.lists[key] = list
+  end
+  trendCache = out
+  return out
+end
+
 -- House IDs in the feed, biggest first.
 function P.Houses()
   local feed, list = Feed(), {}
@@ -273,4 +325,4 @@ function P.NormalPrice(p, itemID)
   return p.avg7 or p.historical or p.region or p.market
 end
 
-function P.ClearCache() cache = {}; histCache = {} end
+function P.ClearCache() cache = {}; histCache = {}; trendCache = nil end

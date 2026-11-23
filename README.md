@@ -6,6 +6,8 @@ A gold ledger, pickpocket and gathering tracker, and auction house advisor for *
 - **Gathering:** pickpocket, skinning, mining and herbalism: how many, what dropped, what it's worth at AH prices, gold per hour.
 - **Inventory advice:** everything you own on all characters (bags, bank, mail), each marked **Sell now / List / Hold / Vendor**.
 - **Market view:** Alt+click any item for its price chart (30 days / 12 weeks / 12 months), trend, and weekly pattern, e.g. *cheapest Tuesday, most expensive Saturday: buy Tuesday, sell Saturday*. Built for a young economy: "normal" means the last few days, and patterns are measured against the trend and only shown when they're real.
+- **Trending:** what's selling fast, getting pricier, drying up or cooling off on your auction house right now, measured from what was actually bought hour by hour. Guardrails keep out grey junk, one-buyer sweeps, sellers reposting and tiny markets.
+- **Quest items:** with Questie installed, items that quests ask for are tagged (*"Quest item: Cloth Donation (58)"*) and Trending has a *Quest items* filter.
 - **Vendor guard:** sold something to a vendor that's worth more on the AH? A popup offers to buy it back.
 
 Region: **EU** (US planned). Rule set: **Normal**.
@@ -42,6 +44,7 @@ Prices load when the game starts (or on `/reload`).
 | `/cutpurse` or `/cl` | open the window (Overview, Gold log, Inventory, Gathering, Market) |
 | Alt+click an item | its price history and advice |
 | `/cl sell` | what to sell on the AH right now |
+| `/cl trending` | what's selling fast right now |
 | `/cl house` | which auction house your prices come from |
 | `/cl house auto` | detect it automatically (default) |
 | `/cl box` | show/hide the small "today" box |
@@ -54,9 +57,10 @@ WoW addons can't go online, so prices are shipped as an addon:
 
 1. Every hour a GitHub Action reads every WoW: Forever auction house of the region from Blizzard's API (`dynamic-forever-eu`, `/data/wow/ruleset/{id}/auctions/{house}` and `/commodities`).
 2. Per item and house it computes the market price (cheapest 15% of units), lowest price, quantity listed, and history: daily for 120 days, monthly beyond that.
-3. It analyses the history (recent baseline, trend per day, weekday pattern with a significance test) and publishes a release with fresh `LootLedger_Prices`.
+3. It compares each hourly snapshot with the previous one to see what was bought (listings gone before they ran out, stacks that shrank; expired and cancel-and-relist are left out).
+4. It analyses the history (recent baseline, trend per day, weekday pattern with a significance test, trending lists with guardrails) and publishes a release with fresh `LootLedger_Prices`.
 
-The feed is in [`poller/`](poller); `node --test poller/analysis.test.mjs poller/history.test.mjs` runs its tests.
+The feed is in [`poller/`](poller); `node --test poller/*.test.mjs` runs its tests.
 
 ## Privacy
 
@@ -66,6 +70,7 @@ Cutpurse Ledger sends nothing anywhere. Your gold log and inventory stay in WoW'
 
 - Auction data: Blizzard Entertainment's World of Warcraft API.
 - Region-wide sales per day: [Saddlebag Exchange](https://saddlebagexchange.com).
+- Quest data: read in-game from [Questie](https://github.com/Questie/Questie)'s QuestieDB when you have it installed. Nothing from Questie is included in Cutpurse Ledger.
 
 Cutpurse Ledger is a fan project, not affiliated with or endorsed by Blizzard Entertainment. World of Warcraft is a trademark of Blizzard Entertainment.
 

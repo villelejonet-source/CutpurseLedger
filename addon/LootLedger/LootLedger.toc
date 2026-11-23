@@ -2,10 +2,10 @@
 ## Title: Cutpurse Ledger
 ## Notes: Gold ledger, pickpocket and gathering tracker, and auction house advisor for WoW: Forever. Prices come from LootLedger_Prices.
 ## Author: Cutpurse Ledger
-## Version: 3.9.0
+## Version: 3.10.0
 ## SavedVariables: LootLedgerAccountDB
 ## SavedVariablesPerCharacter: LootLedgerDB
-## OptionalDeps: LootLedger_Prices, TradeSkillMaster, PickpocketTracker
+## OptionalDeps: LootLedger_Prices, QuestieDB, Questie, TradeSkillMaster, PickpocketTracker
 
 Core.lua
 Gathering.lua
@@ -15,6 +15,7 @@ Inventory.lua
 Advisor.lua
 VendorGuard.lua
 HouseDetect.lua
+Quests.lua
 Tooltip.lua
 UI\Theme.lua
 UI\Box.lua
@@ -24,4 +25,5 @@ UI\TabLog.lua
 UI\TabInventory.lua
 UI\TabGathering.lua
 UI\TabMarket.lua
+UI\TabTrending.lua
 Slash.lua

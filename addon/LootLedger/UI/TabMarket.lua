@@ -61,6 +61,8 @@ local function LastChange(values)
   return last and prev and (last / prev - 1) or nil
 end
 
+local SupplyRows  -- defined below Render
+
 local function Empty()
   local rows = {
     { kind = "title", icon = T.GOLD_ICON, text = "Market", sub = "price history for one item" },
@@ -116,7 +118,7 @@ local function Render(view)
     rows[#rows + 1] = { kind = "note", text = p.hasAH
       and "No history for this item yet: it trades too rarely on your AH to track (under 5 sold a day and under 20 listed)."
       or "This item isn't listed on your AH right now." }
-    return rows
+    return SupplyRows(rows, id, p, nil)
   end
 
   -- Price chart
@@ -182,14 +184,42 @@ local function Render(view)
     rows[#rows + 1] = { kind = "note", text = "No reliable weekly pattern: the weekday differences are within normal day-to-day noise, or they change from week to week. Sell whenever the advice above says so." }
   end
 
-  -- Supply and demand
+  return SupplyRows(rows, id, p, h)
+end
+
+-- Supply, purchases, trending and quests: shown even for items without price history.
+function SupplyRows(rows, id, p, h)
   rows[#rows + 1] = { kind = "section", text = "Supply" }
   if p.auctions then
-    local note = h.usualQty and h.usualQty > 0 and ("usually ~" .. math.floor(h.usualQty + 0.5)) or nil
+    local note = h and h.usualQty and h.usualQty > 0 and ("usually ~" .. math.floor(h.usualQty + 0.5)) or nil
     if note and p.auctions > h.usualQty * 1.5 then note = note .. ", flooded" elseif note and p.auctions < h.usualQty * 0.6 then note = note .. ", scarce" end
     rows[#rows + 1] = { kind = "row", label = "Listed now", note = note, value = tostring(p.auctions) }
   end
   if p.min then rows[#rows + 1] = { kind = "row", label = "Lowest listing", value = ns.Money(p.min) } end
+  local sales = P.Sales(id)
+  if sales then
+    local note = sales.normal and ("normal ~" .. sales.normal .. "/day") or "normal not known yet"
+    note = note .. ", " .. sales.auctions24 .. " separate auctions"
+    local hot = sales.normal and sales.normal > 0 and sales.sold24 >= 1.8 * sales.normal
+    rows[#rows + 1] = { kind = "row", label = "Bought on your AH, last 24h", note = note,
+      value = hot and T.Color(tostring(sales.sold24), C.green) or tostring(sales.sold24) }
+  end
+  local trend = P.Trending()
+  local tr = trend and trend.byItem[id]
+  if tr then
+    local names = { hot = "Selling fast", climbing = "Price climbing", drying = "Drying up", cooling = "Cooling off" }
+    rows[#rows + 1] = { kind = "row", badge = { text = "Trending", color = C.green }, label = names[tr.list] or tr.list,
+      note = "see the Trending tab" }
+  end
+  local quests = ns.Quests.For(id)
+  if quests then
+    rows[#rows + 1] = { kind = "section", text = "Needed for quests", right = T.Color("via Questie", C.muted) }
+    for i = 1, math.min(5, #quests) do
+      local q = quests[i]
+      rows[#rows + 1] = { kind = "row", badge = { text = "Lvl " .. q.level, color = C.gold }, label = q.name }
+    end
+    if #quests > 5 then rows[#rows + 1] = { kind = "note", text = "...and " .. (#quests - 5) .. " more." } end
+  end
   if p.soldPerDay then rows[#rows + 1] = { kind = "row", label = "Sold per day (EU)", note = "Saddlebag Exchange", value = tostring(p.soldPerDay) } end
   rows[#rows + 1] = { kind = "note", text = P.StatusText() }
   return rows

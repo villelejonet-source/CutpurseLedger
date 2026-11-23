@@ -72,6 +72,21 @@ function ns.SellPrice(item)
   return select(11, ns.ItemInfo(item)) or 0
 end
 
+-- Name, quality, item class and binding for an item ID. If the game client hasn't
+-- loaded the item yet, ask for it and return nil; ns.Refresh runs when it arrives.
+-- classID: 0 consumable, 2 weapon, 4 armor, 7 trade goods, 12 quest, ...
+-- bindType: 1 = binds when picked up (can't be traded)
+local pendingItems = {}
+function ns.ItemDetails(id)
+  local name, _, quality, _, _, _, _, _, _, _, _, classID, _, bindType = ns.ItemInfo(id)
+  if name then return { name = name, quality = quality, classID = classID, bindType = bindType } end
+  if not pendingItems[id] and C_Item and C_Item.RequestLoadItemDataByID then
+    pendingItems[id] = true
+    C_Item.RequestLoadItemDataByID(id)
+  end
+  return nil
+end
+
 -- Current and max skill for a profession by name ("Skinning").
 function ns.SkillRank(name)
   if not name then return end
@@ -244,6 +259,16 @@ function ns.Refresh()
   if not ns.db then return end
   for _, fn in ipairs(refreshers) do fn() end
 end
+
+-- Item data arriving from the server: redraw once, shortly after the last one.
+local itemRefreshQueued = false
+ns.On("GET_ITEM_INFO_RECEIVED", function(itemID)
+  if not pendingItems[itemID] then return end
+  pendingItems[itemID] = nil
+  if itemRefreshQueued then return end
+  itemRefreshQueued = true
+  C_Timer.After(0.5, function() itemRefreshQueued = false; ns.Refresh() end)
+end)
 
 ---------------------------------------------------------------------------
 -- Startup

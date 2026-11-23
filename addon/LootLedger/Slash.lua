@@ -13,7 +13,7 @@ SlashCmdList.LOOTLEDGER = function(msg)
   msg = raw:lower():match("^%s*(.-)%s*$")
   if msg == "" then
     ns.OpenTab()
-  elseif msg == "overview" or msg == "log" or msg == "inventory" then
+  elseif msg == "overview" or msg == "log" or msg == "inventory" or msg == "trending" then
     ns.OpenTab(msg)
   elseif msg == "inv" or msg == "sell" then
     ns.OpenTab("inventory", msg == "sell" and "SELL" or nil)
@@ -88,6 +88,6 @@ SlashCmdList.LOOTLEDGER = function(msg)
     ns.Refresh()
     ns.Print("Everything on this character reset.")
   else
-    ns.Print("/cl  open · /cl overview | log | inventory | sell | gathering | skinning | pickpocket | mining | herbalism · /cl market [item] · /cl house · /cl box · /cl session · /cl reset")
+    ns.Print("/cl  open · /cl overview | log | inventory | sell | gathering | skinning | pickpocket | mining | herbalism · /cl trending · /cl market [item] · /cl house · /cl box · /cl session · /cl reset")
   end
 end
