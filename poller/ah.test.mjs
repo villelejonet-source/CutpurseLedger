@@ -48,3 +48,11 @@ test("A1: a house that fails this run keeps its history and snapshot", async () 
   assert.deepEqual(await r.read("114.json.gz"), oldHist);
   assert.deepEqual(await r.read("114.snap.json.gz"), oldSnap);
 });
+
+test("A2: a corrupt history file stops the run instead of starting that house over", async () => {
+  const r = await runFeed(
+    { houses: HOUSES.slice(0, 1), data: { 113: { auctions: [listing(1, 2589, 20, 50)] } } },
+    { "113.json.gz": "not gzip" },
+  );
+  assert.notEqual(r.code, 0, r.out);
+});

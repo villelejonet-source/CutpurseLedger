@@ -63,7 +63,22 @@ jobs:
 
       - name: Get previous history
         if: steps.fresh.outputs.skip != 'true'
-        run: git clone --quiet --depth 1 --branch history "$REPO_URL" history || mkdir -p history
+        # No history branch yet (ls-remote exit 2): start empty. Any other failure stops
+        # the run, so a network hiccup never replaces the real history with an empty one.
+        run: |
+          set +e
+          git ls-remote --quiet --exit-code --heads "$REPO_URL" history > /dev/null
+          code=$?
+          set -e
+          if [ "$code" -eq 2 ]; then
+            echo "No history branch yet: starting empty."
+            mkdir -p history
+          elif [ "$code" -ne 0 ]; then
+            echo "::error::Could not read the history branch (git ls-remote exit $code)"
+            exit 1
+          else
+            git clone --quiet --depth 1 --branch history "$REPO_URL" history
+          fi
 
       - name: Fetch auction houses
         if: steps.fresh.outputs.skip != 'true'

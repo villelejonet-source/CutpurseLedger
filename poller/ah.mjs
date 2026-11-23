@@ -13,11 +13,11 @@
 //      AH_HOUSES   (default "all"; or a list like "113,114")
 //      HISTORY_DIR (default ./history), OUT_DIR (default ./out)
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { gzipSync, gunzipSync } from "node:zlib";
+import { mkdir, writeFile } from "node:fs/promises";
+import { gzipSync } from "node:zlib";
 import { join } from "node:path";
 import { dayKey } from "./analysis.mjs";
-import { carryOverHistory } from "./feed.mjs";
+import { carryOverHistory, readGzJson } from "./feed.mjs";
 import { TIME_LEFT, toSnapshot, diffSnapshots, recordHour } from "./sales.mjs";
 import { trendingLists, encodeEntry } from "./trending.mjs";
 import {
@@ -129,27 +129,20 @@ async function fetchHouse(house, accessToken) {
   };
 }
 
-// Previous hour's listings, to see what was bought since.
+// Previous hour's listings, to see what was bought since. Only a missing file means
+// "none"; a corrupt or unreadable one stops the run instead of losing data.
 async function loadSnapshot(house) {
-  try {
-    return JSON.parse(gunzipSync(await readFile(join(HISTORY_DIR, `${house}.snap.json.gz`))).toString());
-  } catch {
-    return null;
-  }
+  return readGzJson(join(HISTORY_DIR, `${house}.snap.json.gz`));
 }
 
 // ---------------------------------------------------------------------------
 // History files
 // ---------------------------------------------------------------------------
 async function loadHistory(house) {
-  try {
-    const h = JSON.parse(gunzipSync(await readFile(join(HISTORY_DIR, `${house}.json.gz`))).toString());
-    h.days ??= {};
-    h.months ??= {};
-    return h;
-  } catch {
-    return { days: {}, months: {} };
-  }
+  const h = (await readGzJson(join(HISTORY_DIR, `${house}.json.gz`))) ?? {};
+  h.days ??= {};
+  h.months ??= {};
+  return h;
 }
 
 // ---------------------------------------------------------------------------

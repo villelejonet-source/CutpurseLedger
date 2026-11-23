@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { carryOverHistory } from "./feed.mjs";
+import { gzipSync } from "node:zlib";
+import { carryOverHistory, readGzJson } from "./feed.mjs";
 
 const tmp = () => mkdtemp(join(tmpdir(), "feed-"));
 
@@ -22,4 +23,13 @@ test("A1: history of houses not processed this run is carried over", async () =>
 test("A1: no previous history folder means nothing to carry over", async () => {
   const out = await tmp();
   assert.equal(await carryOverHistory(join(out, "missing"), out), 0);
+});
+
+test("A2: a missing file is null, a corrupt one throws", async () => {
+  const dir = await tmp();
+  assert.equal(await readGzJson(join(dir, "113.json.gz")), null);
+  await writeFile(join(dir, "113.json.gz"), "not gzip");
+  await assert.rejects(readGzJson(join(dir, "113.json.gz")));
+  await writeFile(join(dir, "114.json.gz"), gzipSync(JSON.stringify({ days: {} })));
+  assert.deepEqual(await readGzJson(join(dir, "114.json.gz")), { days: {} });
 });
