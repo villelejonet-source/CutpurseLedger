@@ -126,8 +126,8 @@ local function Render(view)
   } }
 
   if p.scanned then
-    rows[#rows + 1] = { kind = "note", text = "AH price from your scan " .. ns.FormatDuration(time() - p.scanned)
-      .. " ago (" .. (p.auctions or 0) .. " listed). The chart and averages come from the hourly feed." }
+    rows[#rows + 1] = { kind = "note", text = "AH price from your scan " .. ns.Ago(time() - p.scanned)
+      .. " (" .. (p.auctions or 0) .. " listed). The chart and averages come from the hourly feed." }
   end
   ScanRows(rows, id)
 

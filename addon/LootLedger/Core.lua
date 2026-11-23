@@ -118,6 +118,15 @@ function ns.ContainerItem(bag, slot)
   end
 end
 
+-- How long ago, for people: "just now", "5 min ago", "3 h ago", "2 days ago".
+function ns.Ago(seconds)
+  local mins = math.floor(math.max(0, seconds) / 60)
+  if mins < 1 then return "just now" end
+  if mins < 90 then return mins .. " min ago" end
+  if mins < 2880 then return math.floor(mins / 60) .. " h ago" end
+  return math.floor(mins / 1440) .. " days ago"
+end
+
 function ns.FormatDuration(seconds)
   seconds = math.floor(seconds)
   return string.format("%dh %02dm", math.floor(seconds / 3600), math.floor((seconds % 3600) / 60))
