@@ -101,3 +101,18 @@ test("a client without the full-scan API says so and changes nothing", () => {
   assert.match(get("PRINTED[#PRINTED]"), /can't scan/);
   assert.equal(get("ns.Prices.Get(2318).market"), 1000);
 });
+
+test("the Scan button appears even when the AH window loads after the AH opens", () => {
+  const { run, get } = luaVM({ files: FILES, before: SETUP + `UIPanelButtonTemplate = true` });
+  // First visit: AUCTION_HOUSE_SHOW arrives before Blizzard's AH UI has made its window.
+  run(`AuctionHouseFrame = nil; FIRE("AUCTION_HOUSE_SHOW")`);
+  assert.equal(get("ns.Scan.button"), null);
+  run(`AuctionHouseFrame = CreateFrame("Frame"); ADVANCE(0.1)`);
+  assert.equal(get("ns.Scan.button ~= nil"), true);
+});
+
+test("the Scan button is also added when Blizzard's AH UI finishes loading", () => {
+  const { run, get } = luaVM({ files: FILES, before: SETUP });
+  run(`AuctionHouseFrame = CreateFrame("Frame"); FIRE("ADDON_LOADED", "Blizzard_AuctionHouseUI")`);
+  assert.equal(get("ns.Scan.button ~= nil"), true);
+});

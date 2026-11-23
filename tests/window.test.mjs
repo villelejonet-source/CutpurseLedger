@@ -64,3 +64,22 @@ test("Sell tab has a Crashed list with its own description", () => {
   assert.match(text, /dropped hard since yesterday/);
   assert.match(get(`${rowsText}(ns.GetTab("sell").render("ALL"))`), /Net worth on Home also counts/);
 });
+
+test("header: a fresh scan shows as the prices' time and hides Reload; an old scan doesn't", () => {
+  const { run, get } = luaVM({ files: FILES, before: feedAged(75) });
+  assert.match(get("ns.HeaderText()"), /prices 75 min old/);
+  assert.equal(get("select(2, ns.HeaderText())"), true);
+  run(`ns.acc.scans = { [113] = { t = NOW - 120, items = {} } }; ns.db.house = 113`);
+  assert.match(get("ns.HeaderText()"), /prices scanned 2 min ago/);
+  assert.equal(get("select(2, ns.HeaderText())"), false, "no Reload while the scan is fresh");
+  run(`ns.acc.scans[113].t = NOW - 70 * 60`);
+  assert.equal(get("select(2, ns.HeaderText())"), true);
+});
+
+test("readable times", () => {
+  const { get } = luaVM({ files: FILES, before: feedAged(20) });
+  assert.equal(get("ns.Ago(20)"), "just now");
+  assert.equal(get("ns.Ago(5 * 60)"), "5 min ago");
+  assert.equal(get("ns.Ago(3 * 3600)"), "3 h ago");
+  assert.equal(get("ns.Ago(3 * 86400)"), "3 days ago");
+});

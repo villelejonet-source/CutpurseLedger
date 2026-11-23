@@ -152,9 +152,13 @@ function P.Status()
   if feed then
     local id, confirmed, how = P.House()
     local h = id and FeedHouses(feed)[id]
+    local updated = h and h.updated or feed.updated
+    -- A scan of this house newer than the feed: current prices are from then.
+    local scan = ns.Scan and ns.Scan.Latest(id or 0)
     return { source = "blizzard", house = id, confirmed = confirmed, how = how,
-      houseName = h and h.name,
-      updated = h and h.updated or feed.updated, days = h and type(h.days) == "number" and h.days or 0 }
+      houseName = h and h.name, updated = updated,
+      scanned = scan and scan.t > (updated or 0) and scan.t or nil,
+      days = h and type(h.days) == "number" and h.days or 0 }
   end
   if P.HasTSM() then return { source = "tsm" } end
   return { source = "none" }

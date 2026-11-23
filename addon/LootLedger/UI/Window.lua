@@ -341,9 +341,18 @@ local function DrawRow(f, r, index)
   local label = r.label or ""
   f.label:SetText(r.note and (label .. "  " .. T.Color(r.note, C.muted)) or label)
   local width = f.label.GetUnboundedStringWidth and f.label:GetUnboundedStringWidth() or f.label:GetStringWidth()
-  local twoLines = r.note ~= nil and width > avail
+  local twoLines = width > avail
   f.label:ClearAllPoints()
   f.label:SetWidth(avail)
+  if f.label.SetWordWrap then f.label:SetWordWrap(false) end
+  if twoLines and not r.note then
+    -- One long label (an advice reason): wrap it onto a second line.
+    if f.label.SetWordWrap then f.label:SetWordWrap(true) end
+    if f.label.SetMaxLines then f.label:SetMaxLines(2) end
+    f.label:SetPoint("LEFT", x, 0)
+    f.note:Hide()
+    return HEIGHTS.row2
+  end
   if twoLines then
     f.label:SetText(label)
     f.label:SetPoint("TOPLEFT", x, -5)
@@ -788,19 +797,28 @@ ns.OnInit(function()
 end)
 
 -- Header subtitle: who you are, and how old the AH prices are.
-local function Subtitle()
-  if not ns.db then return end
+-- Returns the header text and whether to offer Reload. Prices are as old as the
+-- newer of the feed and your last scan of this house. Reload only brings a newer
+-- feed, so it isn't offered while a scan is fresh.
+function ns.HeaderText()
   local text = ns.db.name .. (ns.db.realmLabel and ("  ·  " .. ns.db.realmLabel) or "")
   local s = ns.Prices.Status()
-  local mins = s.source == "blizzard" and s.updated and math.max(0, math.floor((time() - s.updated) / 60))
-  reload:SetShown(mins and mins >= RELOAD_AFTER_MIN or false)
-  if mins then
-    local age = mins < 90 and (mins .. " min") or (mins < 2880 and (math.floor(mins / 60) .. " h") or (math.floor(mins / 1440) .. " days"))
-    local color = mins > 360 and "|cffff6b6b" or (mins > 120 and "|cffffd100" or "")
-    text = text .. "  ·  " .. color .. "prices " .. age .. " old" .. (color ~= "" and "|r" or "")
-  elseif s.source == "none" then
-    text = text .. "  ·  |cffff6b6bno AH prices|r"
-  end
+  if s.source == "none" then return text .. "  ·  |cffff6b6bno AH prices|r", false end
+  if s.source ~= "blizzard" or not s.updated then return text, false end
+  local function Mins(t) return math.max(0, math.floor((time() - t) / 60)) end
+  local feedMins, scanMins = Mins(s.updated), s.scanned and Mins(s.scanned)
+  local mins = scanMins or feedMins
+  local color = mins > 360 and "|cffff6b6b" or (mins > 120 and "|cffffd100" or (scanMins and "|cff5cdc75" or ""))
+  local age = scanMins and ("prices scanned " .. ns.Ago(time() - s.scanned))
+    or ("prices " .. ns.Ago(time() - s.updated):gsub(" ago$", " old"))
+  text = text .. "  ·  " .. color .. age .. (color ~= "" and "|r" or "")
+  return text, feedMins >= RELOAD_AFTER_MIN and (not scanMins or scanMins >= RELOAD_AFTER_MIN)
+end
+
+local function Subtitle()
+  if not ns.db then return end
+  local text, offerReload = ns.HeaderText()
+  reload:SetShown(offerReload)
   subtitle:SetText(text)
 end
 
