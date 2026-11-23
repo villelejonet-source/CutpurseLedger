@@ -38,3 +38,41 @@ export async function readGzJson(file) {
   }
   return JSON.parse(gunzipSync(buf).toString());
 }
+
+// fetch with a timeout on every attempt, retrying network errors, timeouts and bad
+// statuses (except 404) with a growing pause. `read(res)` turns the response into
+// the result inside the same attempt, so a body that fails to arrive is retried too.
+export async function fetchRetry(url, init = {}, { read = (res) => res, tries = 3, timeoutMs = 60_000, delayMs = 2000, what = String(url) } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    let error;
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      if (res.ok) return await read(res);
+      error = new Error(`${res.status} from ${what}`);
+      if (res.status === 404) throw error;
+    } catch (e) {
+      if (e === error) throw e; // 404
+      error = e;
+    }
+    if (attempt >= tries) throw error;
+    await new Promise((r) => setTimeout(r, delayMs * attempt));
+  }
+}
+
+// Diff two snapshots only if the new one isn't missing most listings: a listing
+// count that fell by more than half points at a partial or broken response, and
+// diffing it would count every missing listing as bought.
+export function diffPlausible(prev, cur) {
+  return !prev || cur.l.length * 2 >= prev.l.length;
+}
+
+// Snapshot time: the newer of the two Last-Modified headers (auctions, commodities).
+export function snapshotTime(...lastModified) {
+  const ts = lastModified.map((s) => Date.parse(s ?? "")).filter(Number.isFinite);
+  return ts.length ? Math.max(...ts) : Date.now();
+}
+
+// Text inside a double-quoted Lua string.
+export function luaEscape(s) {
+  return String(s).replace(/[\\"]/g, (c) => "\\" + c).replace(/\r/g, "\\r").replace(/\n/g, "\\n");
+}

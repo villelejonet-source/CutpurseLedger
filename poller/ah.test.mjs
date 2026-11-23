@@ -24,7 +24,7 @@ async function runFeed(spec, history = {}) {
   const specFile = join(dir, "spec.json");
   await writeFile(specFile, JSON.stringify(spec));
   const r = spawnSync(process.execPath, ["--import", pathToFileURL(join(HERE, "fake-bnet.mjs")).href, join(HERE, "ah.mjs")], {
-    env: { ...process.env, FAKE_BNET: specFile, BNET_CLIENT_ID: "x", BNET_CLIENT_SECRET: "y", HISTORY_DIR: hist, OUT_DIR: out },
+    env: { ...process.env, FAKE_BNET: specFile, BNET_CLIENT_ID: "x", BNET_CLIENT_SECRET: "y", HISTORY_DIR: hist, OUT_DIR: out, RETRY_DELAY_MS: "1" },
     encoding: "utf8",
   });
   const read = async (f) => JSON.parse(gunzipSync(await readFile(join(out, "history", f))).toString());
@@ -55,4 +55,49 @@ test("A2: a corrupt history file stops the run instead of starting that house ov
     { "113.json.gz": "not gzip" },
   );
   assert.notEqual(r.code, 0, r.out);
+});
+
+test("A7a: every request has a timeout, and network errors are retried (token included)", async () => {
+  const r = await runFeed({
+    tokenFailures: 1,
+    houses: HOUSES,
+    data: { 113: { auctions: [listing(1, 2589, 20, 50)] }, 114: { throws: true } },
+  });
+  assert.equal(r.code, 0, r.out);
+  const log = (await r.log()).trim().split("\n");
+  assert.ok(log.every((l) => l.endsWith("signal=true")), log.join("\n"));
+  assert.equal(log.filter((l) => l.startsWith("oauth.battle.net")).length, 2);
+  assert.equal(log.filter((l) => l.endsWith("/auctions/114 signal=true")).length, 3, "the failing house was tried 3 times");
+  assert.match(r.out, /house 114 .*fetch failed/);
+});
+
+test("A7b: a listing count that fell by more than half saves the snapshot but skips the sales diff", async () => {
+  const prevSnap = { t: Date.parse("2026-11-23T10:23:00Z"), l: Array.from({ length: 10 }, (_, i) => [i + 1, 2589, 5, 50, 2, 0]) };
+  const r = await runFeed(
+    { houses: HOUSES.slice(0, 1), data: { 113: { auctions: [listing(1, 2589, 5, 50), listing(2, 2589, 5, 50)], lm: "Mon, 23 Nov 2026 11:23:00 GMT" } } },
+    { "113.snap.json.gz": prevSnap },
+  );
+  assert.equal(r.code, 0, r.out);
+  const hist = await r.read("113.json.gz");
+  assert.equal(hist.hours.at(-1).diff, false, "nothing counted as bought");
+  assert.equal((await r.read("113.snap.json.gz")).l.length, 2, "new snapshot saved");
+  assert.match(r.out, /listings fell from 10 to 2, sales diff skipped/);
+});
+
+test("A7c: the snapshot time is the newer of the auctions and commodities Last-Modified", async () => {
+  const r = await runFeed({
+    houses: HOUSES.slice(0, 1),
+    data: { 113: { auctions: [listing(1, 2589, 5, 50)], lm: "Mon, 23 Nov 2026 10:23:00 GMT", clm: "Mon, 23 Nov 2026 11:24:00 GMT" } },
+  });
+  assert.equal(r.code, 0, r.out);
+  assert.equal((await r.read("113.snap.json.gz")).t, Date.parse("2026-11-23T11:24:00Z"));
+});
+
+test("A7d: quotes and backslashes in house names don't break Prices.lua", async () => {
+  // No Lua parser here: the feed workflow runs these tests without npm packages.
+  const name = 'Horde "Old" Realm\\X';
+  const r = await runFeed({ houses: [{ id: 113, name }], data: { 113: { auctions: [listing(1, 2589, 5, 50)] } } });
+  assert.equal(r.code, 0, r.out);
+  const lua = await r.lua();
+  assert.ok(lua.includes('name = "Horde \\"Old\\" Realm\\\\X", faction = "Horde",'), lua.slice(0, 600));
 });
