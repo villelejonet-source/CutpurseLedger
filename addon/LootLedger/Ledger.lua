@@ -243,8 +243,13 @@ end)
 
 -- Modern auction house (WoW: Forever runs the modern client)
 if C_AuctionHouse then
+  -- GetItemID may throw for a location that holds nothing (unverified): check first,
+  -- and never let it break the hook.
   local function ItemIDAt(location)
-    return location and C_Item and C_Item.GetItemID and C_Item.GetItemID(location)
+    if not (location and C_Item and C_Item.GetItemID) then return nil end
+    if C_Item.DoesItemExist and not C_Item.DoesItemExist(location) then return nil end
+    local ok, id = pcall(C_Item.GetItemID, location)
+    return ok and id or nil
   end
   local function OnPost(location, _, quantity)
     local id = ItemIDAt(location)

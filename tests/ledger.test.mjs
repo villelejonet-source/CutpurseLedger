@@ -205,3 +205,21 @@ test("B6: inventory lists only characters sharing the auction house", () => {
   const names = get(`(function() local t = {} for _, ch in ipairs(ns.Inventory.RealmChars()) do t[#t + 1] = ch.name end table.sort(t) return table.concat(t, ",") end)()`);
   assert.equal(names, "Alliance,Old");
 });
+
+test("B7: a post from an empty item location doesn't throw; its deposit is still logged", () => {
+  const { run, log, trade } = vm();
+  run(`FIRE("AUCTION_HOUSE_SHOW")
+       C_AuctionHouse.PostItem({ exists = false }, 1, 20)
+       GAIN(-60)`);
+  assert.deepEqual(log(), ["ah_deposit -60"]);
+  assert.deepEqual(trade(), []);
+});
+
+test("B7: GetItemID throwing even for an existing location doesn't break the hook", () => {
+  const { run, log } = vm();
+  run(`FIRE("AUCTION_HOUSE_SHOW")
+       C_Item.GetItemID = function() error("boom") end
+       C_AuctionHouse.PostItem({ id = 2589 }, 1, 20)
+       GAIN(-60)`);
+  assert.deepEqual(log(), ["ah_deposit -60"]);
+});
