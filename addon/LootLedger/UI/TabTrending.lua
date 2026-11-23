@@ -70,7 +70,7 @@ local function NotReady(t)
   local rows = {}
   rows[#rows + 1] = { kind = "note", text = "Trending needs some history first: the feed compares every hourly snapshot of your auction house to see what was actually bought." }
   rows[#rows + 1] = { kind = "row", label = "Hours of purchase data (last 24h)", note = "need 12",
-    value = tostring(t and t.hoursOfData or 0), bar = math.min(1, (t and t.hoursOfData or 0) / 12), barColor = C.blue }
+    value = tostring(math.floor((t and t.hoursOfData or 0) + 0.5)), bar = math.min(1, (t and t.hoursOfData or 0) / 12), barColor = C.blue }
   rows[#rows + 1] = { kind = "row", label = "Complete days to learn \"normal\"", note = "need 2",
     value = tostring(t and t.baselineDays or 0), bar = math.min(1, (t and t.baselineDays or 0) / 2), barColor = C.blue }
   rows[#rows + 1] = { kind = "note", text = "This fills in by itself. Keep Cutpurse Ledger Prices updated and the lists appear after about two days." }
