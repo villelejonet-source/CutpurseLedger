@@ -570,11 +570,28 @@ ns.OnInit(function()
   Build()
   ns.MakeMovable(win, "winPos")
   ns.RestorePosition(win, "winPos", "CENTER")
-  subtitle:SetText(ns.db.name .. (ns.db.realmLabel and ("  ·  " .. ns.db.realmLabel) or ""))
 end)
+
+-- Header subtitle: who you are, and how old the AH prices are.
+local function Subtitle()
+  if not ns.db then return end
+  local text = ns.db.name .. (ns.db.realmLabel and ("  ·  " .. ns.db.realmLabel) or "")
+  local s = ns.Prices.Status()
+  if s.source == "blizzard" and s.updated then
+    local mins = math.max(0, math.floor((time() - s.updated) / 60))
+    local age = mins < 90 and (mins .. " min") or (mins < 2880 and (math.floor(mins / 60) .. " h") or (math.floor(mins / 1440) .. " days"))
+    local color = mins > 360 and "|cffff6b6b" or (mins > 120 and "|cffffd100" or "")
+    text = text .. "  ·  " .. color .. "prices " .. age .. " old" .. (color ~= "" and "|r" or "")
+  elseif s.source == "none" then
+    text = text .. "  ·  |cffff6b6bno AH prices|r"
+  end
+  subtitle:SetText(text)
+end
+win:HookScript("OnShow", Subtitle)
 
 ns.OnRefresh(function()
   if not win:IsShown() or not mainTab then return end
+  Subtitle()
   local tab = tabByKey[mainTab]
   for key, b in pairs(mainButtons) do b:SetSelected(key == mainTab) end
 

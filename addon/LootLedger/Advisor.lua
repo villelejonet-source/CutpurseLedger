@@ -17,6 +17,8 @@ A.SETTINGS = {
   lowVsNormal = -0.10,   -- 10% below normal = hold (only if not falling)
   fallingTrend = -0.01,  -- losing 1%+ a day = sell now, don't hold
   risingTrend = 0.015,   -- gaining 1.5%+ a day = wait a little (unless it's a spike)
+  minListed = 10,        -- fewer units listed than this: one odd listing sets "the price", don't act on it
+  minSpikeGain = 1000,   -- a spike must be worth 10 silver more per item, or it's noise on a cheap item
 }
 
 A.ACTIONS = {
@@ -37,6 +39,11 @@ function A.IsAHItem(id)
 end
 
 local function Pct(x) return string.format("%+d%%", math.floor(x * 100 + 0.5)) end
+-- "+40% vs normal", or "4x normal" once percentages get silly.
+local function VsText(vs)
+  if vs >= 2 then return math.floor(vs + 1) .. "x normal" end
+  return Pct(vs) .. " vs normal"
+end
 
 local function Quality(id)
   local it = ns.acc and ns.acc.items and ns.acc.items[id]
@@ -85,14 +92,24 @@ function A.Decide(id)
   -- Order matters: a spike is always sold; a falling item is sold before it drops
   -- further; a rising item is held (the "normal" price lags a rising market, so
   -- "+12% vs normal" there is just the climb, not a peak).
-  if vs >= S.spike then
-    d.action, d.reason = "SELL", Pct(vs) .. " vs normal, spike"
+  -- Thin market: with only a handful listed, the "price" is whatever one seller
+  -- typed in. Don't call a spike or a dip on that; tell the player to look.
+  local listed = p.auctions
+  local thin = p.source == "blizzard" and listed ~= nil and listed < S.minListed
+  d.thin = thin
+  local gain = normal and (ah - normal) or 0
+  if thin and (vs >= S.highVsNormal or vs <= S.lowVsNormal) then
+    d.action = "LIST"
+    d.reason = "only " .. listed .. " listed, price uncertain: check the AH"
+  elseif vs >= S.spike and gain >= S.minSpikeGain then
+    d.action, d.reason = "SELL", VsText(vs) .. ", spike"
   elseif falling then
     d.action, d.reason = "SELL", "falling " .. Pct(-trend):gsub("^%+", "") .. "/day, sell before it drops"
   elseif rising then
     d.action, d.reason = "HOLD", "rising " .. Pct(trend) .. "/day, wait a little"
   elseif vs >= S.highVsNormal then
-    d.action, d.reason = "SELL", Pct(vs) .. " vs normal"
+    d.action, d.reason = "SELL", VsText(vs)
+    if gain < S.minSpikeGain then d.reason = d.reason .. ", only " .. ns.Money(gain) .. " more each" end
   elseif vs <= S.lowVsNormal then
     d.action, d.reason = "HOLD", Pct(vs) .. " vs normal, wait"
   else
