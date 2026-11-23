@@ -77,3 +77,10 @@ test("A2: a repository that can't be read fails the step instead of starting emp
   assert.notEqual(r.code, 0, r.out);
   assert.ok(!existsSync(join(cwd, "history")));
 });
+
+test("A3: history is saved right after the fetch, before release and CurseForge", () => {
+  const n = names();
+  assert.equal(n.indexOf("Keep history"), n.indexOf("Fetch auction houses") + 1);
+  assert.ok(n.indexOf("Keep history") < n.indexOf("Publish release"));
+  assert.equal(step("Upload prices to CurseForge")["continue-on-error"], "true");
+});

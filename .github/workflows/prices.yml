@@ -90,6 +90,17 @@ jobs:
           AH_RULESET: ${{ vars.AH_RULESET || '2' }}
           AH_HOUSES: ${{ vars.AH_HOUSES || 'all' }}
 
+      # History lives on its own branch, replaced every run (one commit, so the repo doesn't grow).
+      - name: Keep history
+        if: steps.fresh.outputs.skip != 'true'
+        run: |
+          cd out/history
+          git init --quiet --initial-branch history
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898299+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "history $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push --quiet --force "$REPO_URL" history
+
       - name: Build zip
         if: steps.fresh.outputs.skip != 'true'
         id: build
@@ -111,7 +122,9 @@ jobs:
             --latest
 
       # CurseForge gets the price addon every 6 hours (00, 06, 12, 18 UTC), or when asked.
+      # A CurseForge failure must not stop the steps after it.
       - name: Upload prices to CurseForge
+        continue-on-error: true
         if: ${{ steps.fresh.outputs.skip != 'true' && (inputs.curseforge || github.event_name == 'schedule') }}
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
@@ -124,17 +137,6 @@ jobs:
           (cd dist/pkg && zip -qr "../CutpurseLedgerPrices-EU-$(date -u +%Y%m%d%H%M).zip" LootLedger_Prices)
           node poller/curseforge.mjs --project 1825560 --file dist/CutpurseLedgerPrices-EU-*.zip \
             --name "Prices $stamp UTC" --changelog "Auction house prices for every EU WoW: Forever auction house, $stamp UTC."
-
-      # History lives on its own branch, replaced every run (one commit, so the repo doesn't grow).
-      - name: Keep history
-        if: steps.fresh.outputs.skip != 'true'
-        run: |
-          cd out/history
-          git init --quiet --initial-branch history
-          git add -A
-          git -c user.name="github-actions[bot]" -c user.email="41898299+github-actions[bot]@users.noreply.github.com" \
-            commit --quiet -m "history $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push --quiet --force "$REPO_URL" history
 
       - name: Prune old releases
         if: steps.fresh.outputs.skip != 'true'
