@@ -1,7 +1,16 @@
 -- Cutpurse Ledger: gathering
--- When you cast a tracked spell (Pick Pocket, Skinning, ...), the next loot
--- window belongs to that activity. Money and items received while it is open
--- (plus a short grace period, for auto-loot) are credited to it.
+-- When a tracked spell (Pick Pocket, Skinning, ...) succeeds, what you loot next
+-- belongs to that activity. Crediting starts at the cast itself, not when the
+-- loot window opens: fast-loot addons take the loot (and the coins arrive) before
+-- the window ever shows. It lasts while a loot window is open, plus a short grace
+-- period; if no window shows up at all, it ends a few seconds after the cast.
+--
+-- In a group, other loot can arrive in those same seconds. So:
+--   - nothing counts until YOUR loot window has appeared (LOOT_READY fires even
+--     with fast-loot addons);
+--   - only items that were in that loot window count (not a roll you just won);
+--   - coins shared from someone else's loot ("Your share of the loot is ...") never
+--     count: taken back if they were already credited, skipped if the message comes first.
 
 local ADDON, ns = ...
 local G = {}
@@ -26,9 +35,35 @@ ResetSession()
 ns.OnSessionReset(ResetSession)
 
 local spellToActivity = {}   -- spell name -> activity
-local pending                -- { act, at } after a gathering cast
-local current                -- gathering loot window being credited right now
+local spellIDToActivity = {} -- spell ID -> activity (doesn't depend on the client language)
+local current                -- the gathering loot being credited right now
+local lootOpen = false       -- a loot window is open (LOOT_READY / LOOT_OPENED until LOOT_CLOSED)
+local lastReady              -- { at, slots } the latest loot window, in case it shows before the cast event
+local lastCoins              -- { key, delta, at } the latest coins credited to gathering
+local splitAt                -- when a "your share of the loot" message arrived before its money
 local closeToken = 0
+local SPLIT_WINDOW = 2       -- seconds between a shared-loot message and its money
+
+local SPLIT_PATTERNS = {}
+for _, g in ipairs({ "LOOT_MONEY_SPLIT", "LOOT_MONEY_SPLIT_GUILD" }) do
+  if type(_G[g]) == "string" then SPLIT_PATTERNS[#SPLIT_PATTERNS + 1] = ns.ToPattern(_G[g]) end
+end
+local function IsSplit(msg)
+  for _, pat in ipairs(SPLIT_PATTERNS) do if msg:match(pat) then return true end end
+  return false
+end
+
+-- Item IDs in the open loot window, or nil if they can't be read.
+local function LootSlots()
+  if not (GetNumLootItems and GetLootSlotLink) then return nil end
+  local set, any = {}, false
+  for i = 1, GetNumLootItems() or 0 do
+    local link = GetLootSlotLink(i)
+    local id = link and tonumber(link:match("item:(%d+)"))
+    if id then set[id], any = true, true end
+  end
+  return any and set or nil
+end
 
 local LOOT_PATTERNS = {}
 for _, g in ipairs({ "LOOT_ITEM_SELF_MULTIPLE", "LOOT_ITEM_PUSHED_SELF_MULTIPLE", "LOOT_ITEM_SELF", "LOOT_ITEM_PUSHED_SELF" }) do
@@ -139,11 +174,20 @@ function G.Value(t)
   return t.copper + G.ItemsValue(t.items, t)
 end
 
--- The activity whose loot window is open right now, or nil.
-function G.Current() return current and current.key end
+-- The activity whose loot is being credited right now, or nil. Nothing counts
+-- until your own loot window has appeared after the cast.
+function G.Current() return current and current.sawLoot and current.key or nil end
+
+-- Should these coins go to the current activity? Not if a shared-loot message
+-- just announced them (they're someone else's corpse).
+function G.ClaimMoney(delta)
+  if splitAt and GetTime() - splitAt <= SPLIT_WINDOW then splitAt = nil; return false end
+  return true
+end
 
 function G.AddMoney(delta)
   local key = current.key
+  lastCoins = { key = key, delta = delta, at = GetTime() }
   local b = G.Bucket(key)
   b.copper = b.copper + delta
   local d = G.Day(b)
@@ -229,6 +273,7 @@ end
 ns.OnInit(function()
   G.LockOldLoot()
   for _, a in ipairs(G.ACTIVITIES) do
+    spellIDToActivity[a.spell] = a
     local n = ns.SpellName(a.spell)
     if n then spellToActivity[n] = a end
   end
@@ -249,36 +294,76 @@ ns.OnInit(function()
   end
 end)
 
-ns.On("UNIT_SPELLCAST_SUCCEEDED", function(unit, _, spellID)
-  if unit ~= "player" or not spellID then return end
-  local a = spellToActivity[ns.SpellName(spellID) or ""]
-  if a then pending = { act = a, at = GetTime() } end
-end)
-
-ns.On("LOOT_OPENED", function()
-  if pending and GetTime() - pending.at <= ns.OPEN_TIMEOUT then
-    Finish()  -- previous loot still in its grace period
-    current = { key = pending.act.key, total = 0, got = false }
-    closeToken = closeToken + 1
-    if ns.Ledger then ns.Ledger.SyncMoney() end
-  end
-  pending = nil
-end)
-
-ns.On("LOOT_CLOSED", function()
-  if not current then return end
+-- End the current loot after `seconds`, unless something extends it meanwhile.
+local function FinishAfter(seconds)
   closeToken = closeToken + 1
   local token = closeToken
-  C_Timer.After(ns.GRACE_SECONDS, function()
-    if token == closeToken then Finish() end
+  C_Timer.After(seconds, function()
+    if token == closeToken and not lootOpen then Finish() end
   end)
+end
+
+ns.On("UNIT_SPELLCAST_SUCCEEDED", function(unit, _, spellID)
+  if unit ~= "player" or not spellID then return end
+  local a = spellIDToActivity[spellID] or spellToActivity[ns.SpellName(spellID) or ""]
+  if not a then return end
+  Finish()  -- the previous loot, if it was still in its grace period
+  current = { key = a.key, total = 0, got = false }
+  -- The loot window may already be up (its event can come before the cast's).
+  if lootOpen and lastReady and GetTime() - lastReady.at <= 1 then
+    current.sawLoot, current.slots = true, lastReady.slots
+  end
+  if ns.Ledger then ns.Ledger.SyncMoney() end
+  -- Wait for the loot window; without one, stop after the usual wait + grace.
+  FinishAfter(ns.OPEN_TIMEOUT + ns.GRACE_SECONDS)
+end)
+
+local function LootShown()
+  lootOpen = true
+  local slots = LootSlots()
+  lastReady = { at = GetTime(), slots = slots }
+  if current then
+    closeToken = closeToken + 1  -- keep crediting while it's open
+    current.sawLoot = true
+    if slots then
+      current.slots = current.slots or {}
+      for id in pairs(slots) do current.slots[id] = true end
+    end
+  end
+end
+ns.On("LOOT_READY", LootShown)   -- fires first; fast-loot addons act on it
+ns.On("LOOT_OPENED", LootShown)
+
+ns.On("LOOT_CLOSED", function()
+  lootOpen = false
+  if current then FinishAfter(ns.GRACE_SECONDS) end
+end)
+
+-- Shared coins from someone else's loot: take them back, or keep them out.
+ns.On("CHAT_MSG_MONEY", function(msg)
+  if not (ns.db and msg and IsSplit(msg)) then return end
+  local c = lastCoins
+  if c and GetTime() - c.at <= SPLIT_WINDOW then
+    lastCoins = nil
+    for _, t in ipairs({ G.Bucket(c.key), G.Day(G.Bucket(c.key)), G.session[c.key] }) do t.copper = t.copper - c.delta end
+    if current and current.key == c.key then current.total = current.total - c.delta end
+    for i = 1, 5 do
+      local e = ns.db.ledger.recent[i]
+      if e and e.s == c.key and e.a == c.delta then ns.Ledger.Relabel(e, "loot"); break end
+    end
+    ns.Refresh()
+  else
+    splitAt = GetTime()
+  end
 end)
 
 ns.On("CHAT_MSG_LOOT", function(msg)
-  if not current then return end
+  if not (current and current.sawLoot) then return end
   for _, pat in ipairs(LOOT_PATTERNS) do
     local link, qty = msg:match(pat)
     if link then
+      local id = tonumber(link:match("item:(%d+)"))
+      if current.slots and id and not current.slots[id] then return end  -- not from this loot window
       AddItem(link, tonumber(qty) or 1)
       ns.Refresh()
       return

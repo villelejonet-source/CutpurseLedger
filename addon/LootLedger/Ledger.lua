@@ -88,6 +88,7 @@ local function Relabel(entry, source)
   end
   entry.s = source
 end
+L.Relabel = Relabel
 
 -- Income/expense for a list of day keys, total and by source.
 local function SumDayKeys(keys)
@@ -436,7 +437,7 @@ ns.On("PLAYER_MONEY", function()
   if not ns.db or delta == 0 then return end
   ns.db.gold, ns.db.lastSeen = now, time()
   local activity = ns.Gathering.Current()
-  if activity and delta > 0 then
+  if activity and delta > 0 and ns.Gathering.ClaimMoney(delta) then
     ns.Gathering.AddMoney(delta)
     L.Record(activity, delta)
   else
