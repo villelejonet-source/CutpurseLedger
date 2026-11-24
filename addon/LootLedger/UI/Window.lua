@@ -802,6 +802,8 @@ end)
 -- feed, so it isn't offered while a scan is fresh.
 function ns.HeaderText()
   local text = ns.db.name .. (ns.db.realmLabel and ("  ·  " .. ns.db.realmLabel) or "")
+  local scanning = ns.Scan and ns.Scan.StatusLine()
+  if scanning then return text .. "  ·  |cffffd100" .. scanning .. "|r", false end
   local s = ns.Prices.Status()
   if s.source == "none" then return text .. "  ·  |cffff6b6bno AH prices|r", false end
   if s.source ~= "blizzard" or not s.updated then return text, false end
@@ -821,6 +823,8 @@ local function Subtitle()
   reload:SetShown(offerReload)
   subtitle:SetText(text)
 end
+-- The scan calls this as it goes: just the header line, not the whole window.
+function ns.UpdateHeader() if win:IsShown() then Subtitle() end end
 
 ns.OnRefresh(function()
   if not win:IsShown() or not mainTab then return end

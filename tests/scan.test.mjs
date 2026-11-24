@@ -116,3 +116,40 @@ test("the Scan button is also added when Blizzard's AH UI finishes loading", () 
   run(`AuctionHouseFrame = CreateFrame("Frame"); FIRE("ADDON_LOADED", "Blizzard_AuctionHouseUI")`);
   assert.equal(get("ns.Scan.button ~= nil"), true);
 });
+
+test("scan progress: asking, reading chunk by chunk, done", () => {
+  const { run, get } = vm();
+  assert.equal(get("ns.Scan.ButtonState()"), "Cutpurse scan");
+  run(`assert(ns.Scan.Start())`);
+  assert.equal(get("ns.Scan.Progress().state"), "waiting");
+  run(`ADVANCE(3)`);
+  assert.equal(get("ns.Scan.ButtonState()"), "Asking AH... 3s");
+  assert.equal(get("ns.Scan.StatusLine()"), "asking the AH for every listing...");
+  // 4 listings, CHUNK = 2: the first frame reads half of them
+  run(`FIRE("REPLICATE_ITEM_LIST_UPDATE")`);
+  assert.equal(get("ns.Scan.Progress().state"), "reading");
+  assert.equal(get("ns.Scan.Progress().done"), 2);
+  assert.equal(get("ns.Scan.Progress().total"), 4);
+  assert.equal(get("ns.Scan.ButtonState()"), "Scanning 50%");
+  assert.equal(get("select(2, ns.Scan.ButtonState())"), 0.5);
+  assert.equal(get("ns.Scan.StatusLine()"), "scanning AH 50%");
+  run(`ADVANCE(0)`);
+  assert.equal(get("ns.Scan.Progress().state"), null);
+  assert.equal(get("ns.Scan.ButtonState()"), "Scan done");
+  assert.equal(get("ns.Scan.Progress().last.listings"), 4);
+  assert.equal(get("ns.Scan.StatusLine()"), null);
+  // A few seconds later the button shows the 15-minute wait
+  run(`ADVANCE(10)`);
+  assert.equal(get("ns.Scan.ButtonState()"), "Scan in 15 min");
+});
+
+test("scan progress: a closed AH or no answer shows the scan stopped", () => {
+  const { run, get } = vm();
+  run(`assert(ns.Scan.Start()); FIRE("AUCTION_HOUSE_CLOSED")`);
+  assert.equal(get("ns.Scan.ButtonState()"), "Scan stopped");
+  assert.equal(get("ns.Scan.Progress().last.reason"), "the auction house closed");
+
+  const v2 = vm();
+  v2.run(`assert(ns.Scan.Start()); ADVANCE(ns.Scan.TIMEOUT + 1)`);
+  assert.equal(v2.get("ns.Scan.Progress().last.reason"), "the auction house didn't answer");
+});

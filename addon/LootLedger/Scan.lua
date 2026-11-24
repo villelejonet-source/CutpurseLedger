@@ -26,6 +26,34 @@ S.TIMEOUT = 60           -- seconds to wait for the AH to answer
 
 local state              -- nil, "waiting" (asked the AH) or "reading"
 local scanHouse
+-- Progress, for the button on the AH window and the Cutpurse Ledger header.
+local progress = { done = 0, total = 0 }  -- listings read / listings to read
+local startedAt                           -- GetTime() when the scan was asked for
+local last                                -- how the last scan ended: { at, ok, listings, items, reason }
+
+local function Changed()
+  if S.UpdateButton then S.UpdateButton() end
+  if ns.UpdateHeader then ns.UpdateHeader() end
+end
+
+-- Where the scan is: { state = "waiting"|"reading"|nil, done, total, pct (0..1),
+-- waited (seconds since asked), last = how the previous scan ended (or nil) }
+function S.Progress()
+  local pct = progress.total > 0 and progress.done / progress.total or 0
+  return { state = state, done = progress.done, total = progress.total, pct = pct,
+    waited = startedAt and math.floor(GetTime() - startedAt) or 0, last = last }
+end
+
+-- One short line for the scan, or nil when nothing is going on.
+function S.StatusLine()
+  if state == "waiting" then return "asking the AH for every listing..." end
+  if state == "reading" then return ("scanning AH %d%%"):format(math.floor(S.Progress().pct * 100)) end
+end
+
+local function Num(n)
+  return BreakUpLargeNumbers and BreakUpLargeNumbers(n) or tostring(n)
+end
+S.Num = Num
 
 function S.Supported()
   return C_AuctionHouse and C_AuctionHouse.ReplicateItems and C_AuctionHouse.GetNumReplicateItems
@@ -65,13 +93,21 @@ function S.Summarize(rows)
   return items, n
 end
 
+local function Stopped(reason)
+  state = nil
+  last = { at = GetTime(), ok = false, reason = reason }
+  Changed()
+end
+
 local function Finish(rows, listings)
   state = nil
   local items, n = S.Summarize(rows)
-  if n == 0 then ns.Print("The scan found no listings with a buyout price.") return end
+  last = { at = GetTime(), ok = n > 0, listings = listings, items = n,
+    reason = n == 0 and "no listings with a buyout price" or nil }
+  if n == 0 then Changed(); ns.Print("The scan found no listings with a buyout price.") return end
   ns.acc.scans = ns.acc.scans or {}
   ns.acc.scanDays = ns.acc.scanDays or {}
-  ns.acc.scans[scanHouse] = { t = time(), listings = listings, items = items }
+  ns.acc.scans[scanHouse] = { t = time(), listings = listings, n = n, items = items }
 
   local days = ns.acc.scanDays[scanHouse] or {}
   ns.acc.scanDays[scanHouse] = days
@@ -83,6 +119,7 @@ local function Finish(rows, listings)
 
   ns.Prices.ClearCache()
   ns.Refresh()
+  Changed()
   ns.Print(("Scan done: %d listings, %d items. Prices for this auction house are now as of %s.")
     :format(listings, n, date("%H:%M")))
 end
@@ -91,6 +128,8 @@ end
 local function Read()
   local total = C_AuctionHouse.GetNumReplicateItems() or 0
   local rows, i = {}, 0
+  progress.done, progress.total = 0, total
+  Changed()
   local function Step()
     if state ~= "reading" then return end
     local last = math.min(total - 1, i + S.CHUNK - 1)
@@ -103,7 +142,8 @@ local function Read()
       end
     end
     i = last + 1
-    if i < total then C_Timer.After(0, Step) else Finish(rows, total) end
+    progress.done = i
+    if i < total then Changed(); C_Timer.After(0, Step) else Finish(rows, total) end
   end
   Step()
 end
@@ -122,12 +162,14 @@ function S.Start()
     return false
   end
   state, scanHouse = "waiting", ns.Prices.House() or 0
+  progress.done, progress.total, startedAt = 0, 0, GetTime()
   ns.db.lastScanAt = time()
   C_AuctionHouse.ReplicateItems()
   ns.Print("Scanning the auction house...")
+  Changed()
   C_Timer.After(S.TIMEOUT, function()
     if state == "waiting" then
-      state = nil
+      Stopped("the auction house didn't answer")
       ns.Print("The auction house didn't answer the scan. Try again in a few minutes.")
     end
   end)
@@ -141,7 +183,7 @@ ns.On("REPLICATE_ITEM_LIST_UPDATE", function()
 end)
 
 ns.On("AUCTION_HOUSE_CLOSED", function()
-  if state then state = nil; ns.Print("Scan stopped: the auction house closed.") end
+  if state then Stopped("the auction house closed"); ns.Print("Scan stopped: the auction house closed.") end
 end)
 
 -- A "Scan" button on the auction house window (modern AH frame), made once.
@@ -149,6 +191,37 @@ end)
 -- AUCTION_HOUSE_SHOW reaches us, so we also try when Blizzard's AH UI finishes
 -- loading, and once more on the next frame.
 local button
+local DONE_SHOWN = 8  -- seconds "Scan done" stays on the button
+
+-- What the button shows: text, how full its bar is (0..1) and the bar's colour.
+function S.ButtonState()
+  local p = S.Progress()
+  if p.state == "waiting" then
+    return ("Asking AH... %ds"):format(p.waited), 0.04, { 1, 0.82, 0 }
+  elseif p.state == "reading" then
+    return ("Scanning %d%%"):format(math.floor(p.pct * 100)), p.pct, { 1, 0.82, 0 }
+  end
+  if p.last and GetTime() - p.last.at < DONE_SHOWN then
+    if p.last.ok then return "Scan done", 1, { 0.36, 0.86, 0.46 } end
+    return "Scan stopped", 1, { 1, 0.42, 0.42 }
+  end
+  local wait = S.Wait()
+  if wait > 0 then return ("Scan in %d min"):format(math.ceil(wait / 60)), 0, nil end
+  return "Cutpurse scan", 0, nil
+end
+
+function S.UpdateButton()
+  if not button then return end
+  local text, fill, color = S.ButtonState()
+  button:SetText(text)
+  local w = math.max(0, (button:GetWidth() or 0) - 8)
+  button.fill:SetShown(fill > 0)
+  if fill > 0 then
+    button.fill:SetWidth(math.max(1, w * math.min(1, fill)))
+    button.fill:SetColorTexture(color[1], color[2], color[3], 0.35)
+  end
+end
+
 local function AddButton()
   if button or not S.Supported() or not AuctionHouseFrame then return end
   -- Named, so /run print(CutpurseLedgerScanButton:IsVisible()) can check it in game.
@@ -160,13 +233,37 @@ local function AddButton()
   button:SetPoint("TOPRIGHT", AuctionHouseFrame, "BOTTOMRIGHT", -6, -2)
   button:SetFrameLevel(AuctionHouseFrame:GetFrameLevel() + 20)
   button:SetText("Cutpurse scan")
+  -- Progress bar inside the button, filling left to right while the scan reads.
+  button.fill = button:CreateTexture(nil, "OVERLAY")
+  button.fill:SetPoint("TOPLEFT", 4, -4)
+  button.fill:SetPoint("BOTTOMLEFT", 4, 4)
+  button.fill:Hide()
+  local tick = 0
+  button:SetScript("OnUpdate", function(_, elapsed)
+    tick = tick + elapsed
+    if tick >= 0.25 then tick = 0; S.UpdateButton() end  -- "Asking AH... 12s", cooldown minutes
+  end)
   button:SetScript("OnClick", function() S.Start() end)
   button:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
     GameTooltip:AddLine("Cutpurse Ledger: scan this auction house")
     GameTooltip:AddLine("Reads every listing now, so prices are up to the minute.", 0.8, 0.8, 0.8)
+    local p = S.Progress()
+    if p.state == "waiting" then
+      GameTooltip:AddLine(("Waiting for the auction house to send its listings (%ds, gives up after %ds)."):format(p.waited, S.TIMEOUT), 1, 0.82, 0)
+    elseif p.state == "reading" then
+      GameTooltip:AddLine(("Reading listings: %s of %s (%d%%)"):format(Num(p.done), Num(p.total), math.floor(p.pct * 100)), 1, 0.82, 0)
+    end
+    local latest = S.Latest(ns.Prices.House() or 0)
+    if latest then
+      GameTooltip:AddLine(("Last scan %s: %s listings, %s items."):format(ns.Ago and ns.Ago(time() - latest.t) or date("%H:%M", latest.t),
+        Num(latest.listings or 0), Num(latest.n or (function() local c = 0 for _ in pairs(latest.items or {}) do c = c + 1 end return c end)())), 0.8, 0.8, 0.8)
+    end
+    if p.last and not p.last.ok and not p.state then
+      GameTooltip:AddLine("Last try stopped: " .. p.last.reason .. ".", 1, 0.42, 0.42)
+    end
     local wait = S.Wait()
-    if wait > 0 then GameTooltip:AddLine(("Next scan possible in %d min."):format(math.ceil(wait / 60)), 1, 0.6, 0.2) end
+    if wait > 0 and not p.state then GameTooltip:AddLine(("Next scan possible in %d min."):format(math.ceil(wait / 60)), 1, 0.6, 0.2) end
     GameTooltip:Show()
   end)
   button:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -174,7 +271,8 @@ end
 
 ns.On("AUCTION_HOUSE_SHOW", function()
   AddButton()
-  if not button then C_Timer.After(0, AddButton) end
+  if not button then C_Timer.After(0, function() AddButton(); S.UpdateButton() end) end
+  S.UpdateButton()
 end)
 ns.On("ADDON_LOADED", function(name)
   if name == "Blizzard_AuctionHouseUI" then AddButton() end
