@@ -7,7 +7,7 @@
 - **Gold log:** every copper in and out, labelled by where it came from: mob loot, pickpocketing, vendor, quests, repairs, AH sales, deposits and purchases, mail, flights and more. See it for this session, today, 7 days, 30 days or all time.
 - **Net worth:** gold on all your characters plus what their bags, bank and mail would sell for right now. Each character is priced at its own auction house. Type `/cl worth` or check the Home tab.
 - **What to sell:** everything you own on all characters, marked **Sell now**, **List**, **Hold** or **Vendor**, with the reason. It tells a dip (wait) from a crash where buyers have gone (sell).
-- **Gathering:** pickpocketing, skinning, mining and herbalism: how much, what dropped, gold per hour, and what it's worth at the price *you* actually sell for once you have sales.
+- **Gathering:** pickpocketing, skinning, mining, herbalism and fishing: how much, what dropped, gold per hour, and what it's worth at the price *you* actually sell for once you have sales.
 - **Market view:** Alt+click any item for its price chart (30 days, 12 weeks, 12 months), its trend, and its weekly pattern, for example *cheapest on Tuesday, most expensive on Saturday*.
 - **Trending:** what's selling fast, getting pricier, drying up or cooling off on your auction house, based on what was really bought hour by hour. Needs a few days of data on a new house.
 - **AH scan:** at the auction house, click **Cutpurse scan** (or type `/cl scan`) for prices as listed right now.

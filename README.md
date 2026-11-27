@@ -3,7 +3,7 @@
 A gold ledger, pickpocket and gathering tracker, and auction house advisor for **WoW: Forever**, with auction house prices that update automatically every hour.
 
 - **Gold log:** every copper in and out, labelled (mob loot, pickpocket, vendor, quests, repairs, AH sales and fees, mail, flights…). View it by session, today, 7 days, 30 days or all time.
-- **Gathering:** pickpocket, skinning, mining and herbalism: how many, what dropped, what it's worth at AH prices, gold per hour.
+- **Gathering:** pickpocket, skinning, mining, herbalism and fishing: how many, what dropped, what it's worth at AH prices, gold per hour.
 - **Inventory advice:** everything you own on all characters (bags, bank, mail), each marked **Sell now / List / Hold / Vendor**.
 - **Market view:** Alt+click any item for its price chart (30 days / 12 weeks / 12 months), trend, and weekly pattern, e.g. *cheapest Tuesday, most expensive Saturday: buy Tuesday, sell Saturday*. Built for a young economy: "normal" means the last few days, and patterns are measured against the trend and only shown when they're real.
 - **Trending:** what's selling fast, getting pricier, drying up or cooling off on your auction house right now, measured from what was actually bought hour by hour. Guardrails keep out grey junk, one-buyer sweeps, sellers reposting and tiny markets.

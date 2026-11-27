@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { luaVM } from "./harness.mjs";
 
 const BEFORE = `
-  SPELLS = { [921] = "Pick Pocket", [8613] = "Skinning", [2575] = "Mining", [2366] = "Herb Gathering", [1752] = "Sinister Strike" }
+  SPELLS = { [921] = "Pick Pocket", [8613] = "Skinning", [2575] = "Mining", [2366] = "Herb Gathering", [1752] = "Sinister Strike", [7620] = "Fishing" }
   C_Spell = { GetSpellInfo = function(id) return SPELLS[id] and { name = SPELLS[id] } end }
   LOOT_ITEM_SELF = "You receive loot: %s."
   LOOT_ITEM_SELF_MULTIPLE = "You receive loot: %sx%d."
@@ -173,4 +173,69 @@ test("two pockets in a row are counted separately", () => {
   assert.equal(get(pp("count")), 2);
   assert.equal(get(pp("copper")), 50);
   assert.equal(get(pp("best")), 30);
+});
+
+// Fishing: the catch comes up to ~30 s after the cast, and only fishing loot counts.
+const FISH = `ITEMS[6303] = { name = "Raw Slitherskin Mackerel", sell = 1 }
+  FISHING_LOOT = false
+  IsFishingLoot = function() return FISHING_LOOT end`;
+const fish = (field) => `ns.Gathering.Bucket("fishing").${field}`;
+
+test("fishing: a catch 20 seconds after the cast counts", () => {
+  const { run, get } = vm();
+  run(`${FISH}
+       ${cast(7620)}
+       ADVANCE(20)
+       LOOT_SLOTS = { 6303 }; FISHING_LOOT = true
+       FIRE("UNIT_SPELLCAST_CHANNEL_STOP", "player", "cast-guid", 7620)
+       FIRE("LOOT_READY"); FIRE("LOOT_OPENED")
+       FIRE("CHAT_MSG_LOOT", "You receive loot: " .. LINK(6303) .. ".")
+       FIRE("LOOT_CLOSED"); ADVANCE(5)`);
+  assert.equal(get(`${fish("items")}[6303]`), 1);
+  assert.equal(get(fish("count")), 1);
+  assert.equal(get(fish("empty")), 0);
+});
+
+test("fishing: no bite counts as got away, without waiting the full 30 seconds", () => {
+  const { run, get } = vm();
+  run(`${FISH}
+       ${cast(7620)}
+       ADVANCE(21); FIRE("UNIT_SPELLCAST_CHANNEL_STOP", "player", "cast-guid", 7620)
+       ADVANCE(4)`);
+  assert.equal(get(fish("empty")), 1);
+  assert.equal(get(fish("count")), 0);
+});
+
+test("fishing: a mob looted while the bobber is out isn't a catch", () => {
+  const { run, get } = vm();
+  run(`${FISH}
+       ${cast(7620)}
+       ADVANCE(5)
+       LOOT_SLOTS = { 4306 }; FISHING_LOOT = false
+       FIRE("LOOT_READY"); FIRE("LOOT_OPENED"); GAIN(80)
+       FIRE("CHAT_MSG_LOOT", "You receive loot: " .. LINK(4306) .. ".")
+       FIRE("LOOT_CLOSED")
+       ADVANCE(8)   -- the fish bites after the mob was looted
+       LOOT_SLOTS = { 6303 }; FISHING_LOOT = true
+       FIRE("LOOT_READY")
+       FIRE("CHAT_MSG_LOOT", "You receive loot: " .. LINK(6303) .. ".")
+       FIRE("LOOT_CLOSED"); ADVANCE(5)`);
+  assert.equal(get(`${fish("items")}[4306]`), null);
+  assert.equal(get(fish("copper")), 0);
+  assert.equal(get("LOG(1)"), "loot 80");
+  assert.equal(get(`${fish("items")}[6303]`), 1);  // the catch still counts
+  assert.equal(get(fish("count")), 1);
+});
+
+test("fishing: detected by name with a modern-client spell ID", () => {
+  const { run, get } = vm();
+  run(`${FISH}
+       SPELLS[999001] = "Fishing"
+       ${cast(999001)}
+       ADVANCE(12)
+       LOOT_SLOTS = { 6303 }; FISHING_LOOT = true
+       FIRE("LOOT_READY")
+       FIRE("CHAT_MSG_LOOT", "You receive loot: " .. LINK(6303) .. "x2.")
+       FIRE("LOOT_CLOSED"); ADVANCE(5)`);
+  assert.equal(get(`${fish("items")}[6303]`), 2);
 });

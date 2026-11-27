@@ -149,6 +149,6 @@ SlashCmdList.LOOTLEDGER = function(msg)
     ns.Refresh()
     ns.Print("Everything on this character reset.")
   else
-    ns.Print("/cl  open · /cl overview | log | inventory | sell | gathering | skinning | pickpocket | mining | herbalism · /cl trending · /cl market [item] · /cl worth · /cl scan · /cl house · /cl box · /cl session · /cl reset")
+    ns.Print("/cl  open · /cl overview | log | inventory | sell | gathering | skinning | pickpocket | mining | herbalism | fishing · /cl trending · /cl market [item] · /cl worth · /cl scan · /cl house · /cl box · /cl session · /cl reset")
   end
 end
