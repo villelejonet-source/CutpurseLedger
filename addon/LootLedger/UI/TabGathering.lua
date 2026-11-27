@@ -6,9 +6,10 @@ local G = ns.Gathering
 local T = ns.Theme
 local C = T.C
 
-local function Plural(n, unit)
-  if n == 1 then return n .. " " .. (unit:gsub("s$", "")) end
-  return n .. " " .. unit
+-- "1 skin", "3 skins"; an activity can name its singular (a.one: "catch").
+local function Plural(n, a)
+  if n == 1 then return n .. " " .. (a.one or (a.unit:gsub("s$", ""))) end
+  return n .. " " .. a.unit
 end
 
 local function RenderSummary(period)
@@ -40,7 +41,7 @@ local function RenderSummary(period)
   end
   rows[#rows + 1] = { kind = "section", text = "By activity" }
   for _, e in ipairs(list) do
-    local note = Plural(e.t.count, e.a.unit)
+    local note = Plural(e.t.count, e.a)
     if period == "session" then
       local gph = G.PerHour(e.a.key)
       if gph then note = note .. "  ·  " .. ns.Money(gph) .. " per hour" end
@@ -57,7 +58,7 @@ local function RenderActivity(a, period)
   local t = G.Sum(a.key, period)
   local title, sub = ns.PeriodTitle(period, ns.Ledger.FirstDay())
   local rows = { { kind = "title", icon = T.ActivityIcon(a), text = a.label .. "  ·  " .. title, sub = sub } }
-  local unitName = a.unit:gsub("s$", "")
+  local unitName = a.one or a.unit:gsub("s$", "")
   local tries = t.count + t.empty
   local itemsValue, priced, unpriced, fromSales = G.ItemsValue(t.items, t)
   local value = t.copper + itemsValue
@@ -119,7 +120,7 @@ local function RenderActivity(a, period)
     rows[#rows + 1] = { kind = "row", label = "Still holding", note = "what you still own of it, est.",
       value = ns.Money(math.floor(heldValue + 0.5)) }
   end
-  rows[#rows + 1] = { kind = "row", label = "Empty " .. a.unit, value = tostring(t.empty) }
+  rows[#rows + 1] = { kind = "row", label = a.emptyLabel or ("Empty " .. a.unit), value = tostring(t.empty) }
   if period == "all" and t.best and t.best > 0 then
     rows[#rows + 1] = { kind = "row", label = "Best single " .. unitName, value = ns.Money(t.best) }
   end
@@ -169,7 +170,7 @@ local function RenderActivity(a, period)
       rows[#rows + 1] = { kind = "section", text = "By day" }
       for _, e in ipairs(days) do
         local label = e.k == ns.DayKey(0) and "Today" or (e.k == ns.DayKey(1) and "Yesterday" or e.k)
-        rows[#rows + 1] = { kind = "row", label = label, note = Plural(e.d.count, a.unit),
+        rows[#rows + 1] = { kind = "row", label = label, note = Plural(e.d.count, a),
           value = ns.Money(e.v), bar = best > 0 and e.v / best or 0 }
       end
     end

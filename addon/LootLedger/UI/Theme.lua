@@ -55,6 +55,7 @@ T.SOURCE_ICONS = {
 local ACTIVITY_FALLBACK = {
   pickpocket = I .. "INV_Misc_Bag_11", skinning = I .. "INV_Misc_Pelt_Wolf_01",
   mining = I .. "Trade_Mining", herbalism = I .. "Trade_Herbalism",
+  fishing = I .. "Trade_Fishing",
 }
 T.GOLD_ICON = I .. "INV_Misc_Coin_01"
 T.BAG_ICON = I .. "INV_Misc_Bag_10"

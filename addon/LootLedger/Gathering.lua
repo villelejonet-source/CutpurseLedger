@@ -11,6 +11,10 @@
 --   - only items that were in that loot window count (not a roll you just won);
 --   - coins shared from someone else's loot ("Your share of the loot is ...") never
 --     count: taken back if they were already credited, skipped if the message comes first.
+--
+-- Fishing is the same, but the catch comes up to ~30 seconds after the cast (the
+-- bobber has to bite). It waits that long, stops early when the cast ends without
+-- a catch, and only takes a loot window the game says is fishing loot.
 
 local ADDON, ns = ...
 local G = {}
@@ -21,6 +25,11 @@ G.ACTIVITIES = {
   { key = "skinning",   label = "Skinning",   spell = 8613, unit = "skins", skill = "Skinning" },
   { key = "mining",     label = "Mining",     spell = 2575, unit = "nodes", skill = "Mining" },
   { key = "herbalism",  label = "Herbalism",  spell = 2366, unit = "herbs", skill = "Herbalism" },
+  { key = "fishing",    label = "Fishing",    spell = 7620, unit = "catches", one = "catch", skill = "Fishing",
+    spells = { 7731, 7732, 18248, 131474, 131476, 131490 },  -- other ranks and modern-client IDs
+    wait = 32,                -- seconds from the cast until the bobber can be looted
+    fishing = true,           -- only fishing loot windows count (IsFishingLoot)
+    emptyLabel = "Got away / no bite" },
 }
 G.BY_KEY = {}
 for _, a in ipairs(G.ACTIVITIES) do G.BY_KEY[a.key] = a end
@@ -274,6 +283,7 @@ ns.OnInit(function()
   G.LockOldLoot()
   for _, a in ipairs(G.ACTIVITIES) do
     spellIDToActivity[a.spell] = a
+    for _, id in ipairs(a.spells or {}) do spellIDToActivity[id] = a end
     local n = ns.SpellName(a.spell)
     if n then spellToActivity[n] = a end
   end
@@ -303,18 +313,39 @@ local function FinishAfter(seconds)
   end)
 end
 
+local function ActivityFor(spellID)
+  return spellID and (spellIDToActivity[spellID] or spellToActivity[ns.SpellName(spellID) or ""])
+end
+
+-- Is the open loot window one this activity can take? Fishing: only fishing loot,
+-- so a mob looted while the bobber is out doesn't count as a catch.
+local function Accepts(a)
+  if a and a.fishing and IsFishingLoot then return IsFishingLoot() and true or false end
+  return true
+end
+
 ns.On("UNIT_SPELLCAST_SUCCEEDED", function(unit, _, spellID)
   if unit ~= "player" or not spellID then return end
-  local a = spellIDToActivity[spellID] or spellToActivity[ns.SpellName(spellID) or ""]
+  local a = ActivityFor(spellID)
   if not a then return end
   Finish()  -- the previous loot, if it was still in its grace period
-  current = { key = a.key, total = 0, got = false }
+  current = { key = a.key, total = 0, got = false, a = a }
   -- The loot window may already be up (its event can come before the cast's).
-  if lootOpen and lastReady and GetTime() - lastReady.at <= 1 then
+  if lootOpen and lastReady and GetTime() - lastReady.at <= 1 and Accepts(a) then
     current.sawLoot, current.slots = true, lastReady.slots
   end
   if ns.Ledger then ns.Ledger.SyncMoney() end
   -- Wait for the loot window; without one, stop after the usual wait + grace.
+  FinishAfter((a.wait or ns.OPEN_TIMEOUT) + ns.GRACE_SECONDS)
+end)
+
+-- Fishing is a channel: when it ends without a loot window (cancelled, moved, the
+-- fish got away), stop waiting. Looting the bobber also ends it, so allow the
+-- usual short wait for the window to show.
+ns.On("UNIT_SPELLCAST_CHANNEL_STOP", function(unit, _, spellID)
+  if unit ~= "player" or not (current and current.a.wait) or current.sawLoot or lootOpen then return end
+  local a = ActivityFor(spellID)
+  if a and a.key ~= current.key then return end
   FinishAfter(ns.OPEN_TIMEOUT + ns.GRACE_SECONDS)
 end)
 
@@ -322,7 +353,7 @@ local function LootShown()
   lootOpen = true
   local slots = LootSlots()
   lastReady = { at = GetTime(), slots = slots }
-  if current then
+  if current and Accepts(current.a) then
     closeToken = closeToken + 1  -- keep crediting while it's open
     current.sawLoot = true
     if slots then
@@ -336,7 +367,9 @@ ns.On("LOOT_OPENED", LootShown)
 
 ns.On("LOOT_CLOSED", function()
   lootOpen = false
-  if current then FinishAfter(ns.GRACE_SECONDS) end
+  -- A window that wasn't ours (a mob looted while the bobber is out) doesn't end
+  -- the wait for the catch.
+  if current and (current.sawLoot or not current.a.wait) then FinishAfter(ns.GRACE_SECONDS) end
 end)
 
 -- Shared coins from someone else's loot: take them back, or keep them out.
