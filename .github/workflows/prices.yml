@@ -111,6 +111,7 @@ jobs:
           BNET_REGION: ${{ vars.BNET_REGION || 'eu' }}
           AH_RULESET: ${{ vars.AH_RULESET || '2' }}
           AH_HOUSES: ${{ vars.AH_HOUSES || 'all' }}
+          ARCHIVE_HOUSES: ${{ vars.ARCHIVE_HOUSES || '114' }}   # hourly prices kept 35 days (poller/archive.mjs)
 
       # History lives on its own branch, replaced every run (one commit, so the repo doesn't grow).
       - name: Keep history

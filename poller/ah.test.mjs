@@ -12,7 +12,7 @@ import { gzipSync, gunzipSync } from "node:zlib";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // Run ah.mjs; `history` = { file: object } written gzipped into HISTORY_DIR first (null = no folder).
-async function runFeed(spec, history = {}) {
+async function runFeed(spec, history = {}, extraEnv = {}) {
   const dir = await mkdtemp(join(tmpdir(), "ah-"));
   const hist = join(dir, "history"), out = join(dir, "out");
   if (history) {
@@ -24,7 +24,7 @@ async function runFeed(spec, history = {}) {
   const specFile = join(dir, "spec.json");
   await writeFile(specFile, JSON.stringify(spec));
   const r = spawnSync(process.execPath, ["--import", pathToFileURL(join(HERE, "fake-bnet.mjs")).href, join(HERE, "ah.mjs")], {
-    env: { ...process.env, FAKE_BNET: specFile, BNET_CLIENT_ID: "x", BNET_CLIENT_SECRET: "y", HISTORY_DIR: hist, OUT_DIR: out, RETRY_DELAY_MS: "1" },
+    env: { ...process.env, FAKE_BNET: specFile, BNET_CLIENT_ID: "x", BNET_CLIENT_SECRET: "y", HISTORY_DIR: hist, OUT_DIR: out, RETRY_DELAY_MS: "1", ...extraEnv },
     encoding: "utf8",
   });
   const read = async (f) => JSON.parse(gunzipSync(await readFile(join(out, "history", f))).toString());
@@ -169,4 +169,24 @@ test("A10: every house failing still fails the run (old prices alone are not a n
   const block = `  [114] = { name = "A", faction = "Alliance", updated = ${Math.floor(Date.now() / 1000)}, listings = 5, days = 1, items = {} },`;
   const r = await runFeed({ houses: HOUSES.slice(1), data: { 114: { status: 500 } } }, { "114.block.lua": block });
   assert.notEqual(r.code, 0);
+});
+
+test("A11: hourly archive: only the chosen houses and items that trade 3+ a day", async () => {
+  const auctions = [listing(1, 2589, 20, 50), listing(2, 2589, 5, 52), listing(3, 2589, 10, 62), listing(4, 2318, 2, 300)];
+  const spec = { houses: HOUSES, data: { 113: { auctions }, 114: { auctions } } };
+  const today = new Date().toISOString().slice(0, 10);
+  const sales = { sales: { [today]: { 2589: [50, 20, 2500] } }, salesHours: { [today]: 24 }, days: {}, months: {} };
+  const r = await runFeed(spec, { "113.json.gz": sales }, { ARCHIVE_HOUSES: "113" });
+  assert.equal(r.code, 0, r.out);
+  const files = await r.outHistory();
+  const day = files.filter((f) => f.startsWith("113.hours."));
+  assert.equal(day.length, 1);
+  assert.ok(!files.some((f) => f.startsWith("114.hours.")), "114 isn't archived");
+  const a = await r.read(day[0]);
+  assert.deepEqual(a.fields, ["min", "market", "qty", "n", "q5", "q10", "q25", "sold", "gold", "span"]);
+  assert.equal(a.hours.length, 1);
+  // Linen: 35 listed at 50/52/62: 25 within 5%, 25 within 10%, 35 within 25%; no comparison yet
+  assert.deepEqual(a.hours[0].d[2589], [50, 50, 35, 3, 25, 25, 35, 0, 0, 0]);
+  assert.equal(a.hours[0].d[2318], undefined, "never bought: not archived");
+  assert.match(r.out, /house 113: hourly archive \+1 items/);
 });
