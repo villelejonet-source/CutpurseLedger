@@ -46,10 +46,30 @@ try {
       throw "The release $($release.name) has no $folder folder; nothing was changed."
     }
   }
+  # Copy the new folder next to the old one first, then swap them, so a failed
+  # copy (full disk, file in use) leaves the old addon in place.
   foreach ($folder in "LootLedger", "LootLedger_Prices") {
     $dest = Join-Path $AddOns $folder
-    if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-    Copy-Item -Recurse (Join-Path $tmp "x\$folder") $dest
+    $new = "$dest.new"
+    $old = "$dest.old"
+    foreach ($p in $new, $old) { if (Test-Path $p) { Remove-Item -Recurse -Force $p } }
+    Copy-Item -Recurse (Join-Path $tmp "x\$folder") $new
+    if (Test-Path $dest) {
+      if ((Get-Item $dest -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        # A link (say, a junction to a developer's checkout): remove the link only,
+        # never the files it points to.
+        [IO.Directory]::Delete($dest, $false)
+      } else {
+        Rename-Item $dest "$folder.old"
+      }
+    }
+    try {
+      Rename-Item $new $folder
+    } catch {
+      if (Test-Path $old) { Rename-Item $old $folder }
+      throw
+    }
+    if (Test-Path $old) { Remove-Item -Recurse -Force $old }
   }
 } finally {
   Remove-Item -Recurse -Force $tmp

@@ -44,7 +44,7 @@ test("A1: a house that fails this run keeps its history and snapshot", async () 
     { "114.json.gz": oldHist, "114.snap.json.gz": oldSnap },
   );
   assert.equal(r.code, 0, r.out);
-  assert.deepEqual((await r.outHistory()).sort(), ["113.json.gz", "113.snap.json.gz", "114.json.gz", "114.snap.json.gz"]);
+  assert.deepEqual((await r.outHistory()).sort(), ["113.block.lua", "113.json.gz", "113.snap.json.gz", "114.json.gz", "114.snap.json.gz"]);
   assert.deepEqual(await r.read("114.json.gz"), oldHist);
   assert.deepEqual(await r.read("114.snap.json.gz"), oldSnap);
 });
@@ -147,4 +147,26 @@ test("A8: time of week: the hourly market index is kept, and each house gets its
   assert.ok(Math.abs(h.index[0].v - Math.log(1.1)) < 0.001, `index ${h.index[0].v}`);
   assert.match(await r.lua(), /week = "(-?\d*,){167}-?\d*;\d+;[01];\d*",/);
   assert.match(r.out, /time of week not ready \(1 hours, /);
+});
+
+test("A9: a house that fails keeps its last good prices in the feed (up to 2 days), so players aren't switched to another house", async () => {
+  const block = (updated) => `  [114] = { name = "Alliance Thunderstrike", faction = "Alliance", updated = ${updated}, listings = 5, days = 1,\n    items = {\n[2589]="77,77,5,0,0",\n    } },`;
+  const spec = { houses: HOUSES, data: { 113: { auctions: [listing(1, 2589, 20, 50)] }, 114: { status: 500 } } };
+  const fresh = await runFeed(spec, { "114.block.lua": block(Math.floor(Date.now() / 1000) - 3600) });
+  assert.equal(fresh.code, 0, fresh.out);
+  const lua = await fresh.lua();
+  assert.match(lua, /\[114\] = \{ name = "Alliance Thunderstrike"/);
+  assert.match(lua, /\[2589\]="77,77,5,0,0"/);
+  assert.match(fresh.out, /house 114 .*kept its last good prices/);
+  assert.deepEqual((await fresh.outHistory()).filter((f) => f.endsWith(".block.lua")).sort(), ["113.block.lua", "114.block.lua"]);
+
+  const old = await runFeed(spec, { "114.block.lua": block(Math.floor(Date.now() / 1000) - 3 * 86400) });
+  assert.equal(old.code, 0, old.out);
+  assert.doesNotMatch(await old.lua(), /\[114\] = \{/);
+});
+
+test("A10: every house failing still fails the run (old prices alone are not a new release)", async () => {
+  const block = `  [114] = { name = "A", faction = "Alliance", updated = ${Math.floor(Date.now() / 1000)}, listings = 5, days = 1, items = {} },`;
+  const r = await runFeed({ houses: HOUSES.slice(1), data: { 114: { status: 500 } } }, { "114.block.lua": block });
+  assert.notEqual(r.code, 0);
 });

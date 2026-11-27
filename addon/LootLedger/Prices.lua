@@ -92,6 +92,9 @@ function P.House()
   local houses = FeedHouses(feed)
   local chosen = db and db.house
   if chosen and houses[chosen] then return chosen, true, db.houseSource or "manual" end
+  -- Known, but missing from this feed (the feed couldn't read it): stay on it with
+  -- no prices rather than quietly using another house's.
+  if chosen then return chosen, true, db.houseSource or "manual" end
   -- Not known yet: guess the biggest house of the player's faction.
   local faction = UnitFactionGroup and UnitFactionGroup("player")
   local guess

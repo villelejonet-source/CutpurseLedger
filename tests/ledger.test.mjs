@@ -300,3 +300,44 @@ test("C1: the box only refreshes while it's shown, and catches up when shown", (
   run(`ns.Refresh()`);
   assert.equal(get("SUMS"), 2);
 });
+
+// Corpse coins: the "You loot ..." line can come before or after the money.
+test("B9: corpse coins first, then the loot line: a quest reward a second later is still a quest reward", () => {
+  const v = vm();
+  v.run(`FIRE("LOOT_OPENED"); GAIN(50); FIRE("CHAT_MSG_MONEY", "You loot 50 Copper"); FIRE("LOOT_CLOSED")`);
+  v.run(`ADVANCE(1); FIRE("QUEST_TURNED_IN"); GAIN(5000)`);
+  assert.deepEqual(v.log(), ["loot 50", "quest 5000"]);
+});
+
+test("B9: pickpocket coins, then mail money 2 seconds later: the mail isn't called loot", () => {
+  const v = vm();
+  v.run(`FIRE("UNIT_SPELLCAST_SUCCEEDED", "player", nil, 921); FIRE("LOOT_READY"); GAIN(50); FIRE("CHAT_MSG_MONEY", "You loot 50 Copper"); FIRE("LOOT_CLOSED")`);
+  v.run(`ADVANCE(2); FIRE("MAIL_SHOW"); GAIN(10000)`);
+  assert.deepEqual(v.log(), ["pickpocket 50", "mail_in 10000"]);
+});
+
+test("B9: the loot line before the money still labels it, and money first with no window is relabelled", () => {
+  const v = vm();
+  v.run(`FIRE("CHAT_MSG_MONEY", "You loot 30 Copper"); GAIN(30)`);
+  assert.deepEqual(v.log(), ["loot 30"]);
+  const w = vm();
+  w.run(`GAIN(40); FIRE("CHAT_MSG_MONEY", "You loot 40 Copper")`);
+  assert.deepEqual(w.log(), ["loot 40"]);
+});
+
+test("B9: two corpses: the second loot line isn't matched to the first corpse's coins", () => {
+  const v = vm();
+  v.run(`GAIN(40); FIRE("CHAT_MSG_MONEY", "You loot 40 Copper")`);
+  v.run(`FIRE("CHAT_MSG_MONEY", "You loot 25 Copper"); GAIN(25)`);
+  assert.deepEqual(v.log(), ["loot 40", "loot 25"]);
+});
+
+test("B10: an item bought with honor (no gold) doesn't shift the name on the next gold purchase", () => {
+  const v = vm();
+  v.run(`MERCHANT = { 2589, 2318 }
+    GetMerchantItemInfo = function(i) return "x", nil, i == 1 and 0 or 15 end
+    FIRE("MERCHANT_SHOW")
+    BuyMerchantItem(1, 1)
+    BuyMerchantItem(2, 1); GAIN(-15)`);
+  assert.deepEqual(v.log(), ["vendor_buy -15 2318"]);
+});

@@ -41,3 +41,20 @@ test("prices: the write token goes only to the steps that use git or gh", () => 
     assert.ok(!s.env?.GH_TOKEN && !s.env?.REPO_URL, `${name} must not get the write token`);
   }
 });
+
+test("prices: no write token left on disk for the feed's steps", () => {
+  const job = load("prices.yml").jobs.prices;
+  const checkout = job.steps.find((s) => s.uses?.startsWith("actions/checkout"));
+  assert.equal(checkout.with?.["persist-credentials"], false, "checkout must not keep the token in .git/config");
+  const hist = job.steps.find((s) => s.name === "Get previous history");
+  assert.match(hist.run, /git -C history remote set-url origin "https:\/\/github\.com\//, "the history clone must drop the token from its remote");
+});
+
+test("prices: the addon it ships is tested (tests and Lua syntax) before the zip is built", () => {
+  const names = load("prices.yml").jobs.prices.steps.map((s) => s.name);
+  const at = (n) => names.indexOf(n);
+  assert.ok(at("Addon tests") >= 0 && at("Addon tests") < at("Build zip"));
+  const run = load("prices.yml").jobs.prices.steps[at("Addon tests")].run;
+  assert.match(run, /node --test tests\/\*\.test\.mjs/);
+  assert.match(run, /luaparse/);
+});

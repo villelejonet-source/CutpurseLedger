@@ -31,3 +31,16 @@ test("bank scan counts every container once, and not the reagent bag", () => {
   assert.equal(get("ns.db.inv.bank[2319]"), 7, "a bank tab is counted once");
   assert.equal(get("ns.Inventory.Count(ns.db, 2318)"), 20);
 });
+
+test("alts on another auction house (realm names are empty on Forever) aren't counted as this AH's stock", () => {
+  const { run, get } = luaVM({ files: FILES, before: CLIENT + `
+    LootLedgerAccountDB = { chars = {
+      ["-Vanish"] = { house = 114 },
+      ["-Alt"]    = { name = "Alt", realm = "", faction = "Horde", house = 114, inv = { bags = { [2589] = 5 } } },
+      ["-Other"]  = { name = "Other", realm = "", faction = "Horde", house = 117, inv = { bags = { [2589] = 50 } } },
+      ["-Old"]    = { name = "Old", realm = "", faction = "Horde", inv = { bags = { [2589] = 2 } } },
+    } }` });
+  run(`FIRE("BAG_UPDATE_DELAYED")`);
+  // Vanish 10 + Alt 5 (same house) + Old 2 (no house known yet: same realm and faction) ; not Other's 50
+  assert.equal(get("ns.Inventory.AllItems()[2589].total"), 17);
+});

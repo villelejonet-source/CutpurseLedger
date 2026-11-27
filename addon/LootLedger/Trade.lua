@@ -246,7 +246,11 @@ end
 -- Does a saved character share this character's auction house (same realm and
 -- faction)? Characters saved before factions were kept (no ch.faction) count as
 -- matching until they next log in.
+-- Forever returns "" for every realm name, so when both characters have an
+-- auction house set (detected at the AH or chosen), that decides it.
 function Tr.SameAH(ch)
+  if ch == ns.db then return true end
+  if ch.house and ns.db.house then return ch.house == ns.db.house end
   if ch.realm ~= ns.db.realm then return false end
   return not ch.faction or not ns.db.faction or ch.faction == ns.db.faction
 end
