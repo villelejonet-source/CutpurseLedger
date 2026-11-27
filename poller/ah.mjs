@@ -11,6 +11,7 @@
 // Env: BNET_CLIENT_ID, BNET_CLIENT_SECRET (required)
 //      BNET_REGION (default eu), AH_RULESET (default 2 = Normal),
 //      AH_HOUSES   (default "all"; or a list like "113,114")
+//      ARCHIVE_HOUSES (default none; e.g. "114"): houses whose hourly prices are archived (poller/archive.mjs)
 //      HISTORY_DIR (default ./history), OUT_DIR (default ./out)
 //      RETRY_DELAY_MS (default 2000; pause before a retry, times the attempt number)
 
@@ -22,6 +23,7 @@ import { carryOverHistory, readGzJson, fetchRetry, diffPlausible, snapshotTime, 
 import { TIME_LEFT, toSnapshot, diffSnapshots, recordHour } from "./sales.mjs";
 import { trendingLists, encodeEntry } from "./trending.mjs";
 import { recordIndex, marketIndex, backfillIndex, hourProfile, encodeWeekHours } from "./weekhours.mjs";
+import { archiveHour, pruneArchive, depth } from "./archive.mjs";
 import {
   addSnapshot, archiveOldDays, allDays, seriesFor, average, encodeHistory, labels, monthKeys, monthlyFor,
 } from "./history.mjs";
@@ -31,6 +33,7 @@ const {
   BNET_REGION = "eu",
   AH_RULESET = "2",
   AH_HOUSES = "all",
+  ARCHIVE_HOUSES = "",
   HISTORY_DIR = "history",
   OUT_DIR = "out",
   RETRY_DELAY_MS = "2000",
@@ -39,6 +42,7 @@ const {
 if (!BNET_CLIENT_ID || !BNET_CLIENT_SECRET) throw new Error("Set BNET_CLIENT_ID and BNET_CLIENT_SECRET");
 
 const REGION = BNET_REGION.toLowerCase();
+const ARCHIVED = new Set(ARCHIVE_HOUSES.split(",").map((s) => Number(s.trim())).filter(Boolean));
 const NAMESPACE = `dynamic-forever-${REGION}`;
 const MARKET_SHARE = 0.15;         // market value = average of the cheapest 15% of units
 const HIST_MIN_SOLD_PER_DAY = 5;   // per-item history only for items that actually trade...
@@ -100,7 +104,7 @@ function summarize(listings) {
       taken += use;
       if (taken >= want) break;
     }
-    items[id] = { min: Math.round(rows[0][0]), market: Math.round(sum / taken), qty, n: rows.length };
+    items[id] = { min: Math.round(rows[0][0]), market: Math.round(sum / taken), qty, n: rows.length, depth: depth(rows) };
   }
   return items;
 }
@@ -245,6 +249,12 @@ for (const house of houses) {
   const weekHours = hourProfile(history.index);
   await writeFile(join(OUT_DIR, "history", `${house.id}.snap.json.gz`), gzipSync(JSON.stringify(fresh ? data.snapshot : prevSnap)));
   await writeFile(join(OUT_DIR, "history", `${house.id}.json.gz`), gzipSync(JSON.stringify(history)));
+  if (ARCHIVED.has(house.id)) {
+    const dir = join(OUT_DIR, "history");
+    const a = fresh ? await archiveHour(dir, house.id, data.snapshot.t, data.items, sold, span, history) : { added: 0 };
+    const removed = await pruneArchive(dir, house.id, now);
+    console.log(`house ${house.id}: hourly archive +${a.added} items${fresh ? "" : " (no new snapshot)"}${removed ? `, ${removed} old days removed` : ""}`);
+  }
 
   // Trending lists and per-item sales for the game.
   const trend = trendingLists(history, data.items, data.snapshot.t);
