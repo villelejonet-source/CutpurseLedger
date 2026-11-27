@@ -285,6 +285,59 @@ function P.DayList(idxs, long)
 end
 
 ---------------------------------------------------------------------------
+-- Time of week: the whole auction house's prices by hour of the week, from
+-- the feed's `week` string (see poller/weekhours.mjs). Hours are UTC, the
+-- same as the feed's days; P.WhenText shows them on the player's own clock.
+---------------------------------------------------------------------------
+local weekCache
+-- { pct = { [0..167] = fraction vs the week, or false }, weeks, reliable, since,
+--   best, worst (hour of the week, 0 = Monday 00:00 UTC) } or nil
+function P.WeekHours()
+  local h = CurrentHouse()
+  local s = h and type(h.week) == "string" and h.week
+  if not s then return nil end
+  if weekCache and weekCache.src == s then return weekCache end
+  local vals, weeks, rel, since = s:match("^([^;]*);(%d*);(%d*);(%d*)$")
+  if not vals then return nil end
+  local out = { src = s, pct = {}, weeks = tonumber(weeks) or 0, reliable = rel == "1", since = tonumber(since) }
+  local i = 0
+  for v in (vals .. ","):gmatch("([^,]*),") do
+    if i > 167 then break end
+    out.pct[i] = tonumber(v) and tonumber(v) / 1000 or false
+    i = i + 1
+  end
+  for b = 0, 167 do
+    local v = out.pct[b]
+    if v then
+      if not out.best or v > out.pct[out.best] then out.best = b end
+      if not out.worst or v < out.pct[out.worst] then out.worst = b end
+    end
+  end
+  if not out.best then out.reliable = false end
+  weekCache = out
+  return out
+end
+
+-- UTC hour of the week at time t (0 = Monday 00:00), and the UTC weekday (1 = Monday).
+function P.HourOfWeek(t)
+  local d = date("!*t", t or time())
+  local wd = (d.wday + 5) % 7
+  return wd * 24 + d.hour, wd + 1
+end
+
+-- Start of the next hour `how` (UTC hour of the week), from t on (this hour counts).
+function P.NextHourOfWeek(how, t)
+  t = t or time()
+  return t - t % 3600 + ((how - P.HourOfWeek(t)) % 168) * 3600
+end
+
+-- "Fri 18:00" on the player's clock
+function P.WhenText(t)
+  local d = date("*t", t)
+  return DAY_SHORT[(d.wday + 5) % 7 + 1] .. string.format(" %02d:00", d.hour)
+end
+
+---------------------------------------------------------------------------
 -- 2. TSM
 ---------------------------------------------------------------------------
 local TSM_SOURCES = {
@@ -363,4 +416,4 @@ function P.NormalPrice(p, itemID)
   return p.avg7 or p.historical or p.region or p.market
 end
 
-function P.ClearCache() cache = {}; histCache = {}; trendCache = nil end
+function P.ClearCache() cache = {}; histCache = {}; trendCache = nil; weekCache = nil end

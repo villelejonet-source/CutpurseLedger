@@ -127,3 +127,24 @@ test("security: hostile IDs and numbers from Saddlebag or Blizzard never reach P
   assert.doesNotMatch(lua, /\[4306\]=/);
   assert.match(lua, /\[2589\]="50,50,5,/);
 });
+
+test("A8: time of week: the hourly market index is kept, and each house gets its week profile", async () => {
+  // 40 items with a price yesterday; today they list 10% higher.
+  const yesterday = new Date(Date.now() - 86400e3).toISOString().slice(0, 10);
+  const day = {};
+  const auctions = [];
+  for (let i = 0; i < 40; i++) {
+    day[3000 + i] = [1000 * 24, 24, 1000, 50 * 24];
+    auctions.push(listing(i + 1, 3000 + i, 50, 1100));
+  }
+  const r = await runFeed(
+    { houses: HOUSES.slice(0, 1), data: { 113: { auctions } } },
+    { "113.json.gz": { days: { [yesterday]: day }, months: {}, index: [] } },
+  );
+  assert.equal(r.code, 0, r.out);
+  const h = await r.read("113.json.gz");
+  assert.equal(h.index.length, 1);
+  assert.ok(Math.abs(h.index[0].v - Math.log(1.1)) < 0.001, `index ${h.index[0].v}`);
+  assert.match(await r.lua(), /week = "(-?\d*,){167}-?\d*;\d+;[01];\d*",/);
+  assert.match(r.out, /time of week not ready \(1 hours, /);
+});

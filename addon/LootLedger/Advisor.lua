@@ -25,6 +25,10 @@ A.SETTINGS = {
   minDemandNormal = 5,   -- the item must normally sell 5+ a day for its sales to tell anything
   crashVsNormal = -0.25, -- a crash: 25%+ below normal...
   crashVsRecent = -0.15, -- ...and 15%+ below the last two days, so it happened just now
+  -- Time of week (a reliable weekly pattern for the item, or for the whole house)
+  waitGain = 0.05,       -- wait for a better time of the week only if it usually pays 5%+ more...
+  minWaitGain = 100,     -- ...and at least 1 silver more per item
+  peakNear = 0.02,       -- within 2% of the week's best = a good time now (whole-house pattern)
 }
 
 A.ACTIONS = {
@@ -87,6 +91,57 @@ local function RecentDrop(h, ah)
   return best and best > 0 and (ah / best - 1) or nil
 end
 
+local function Contains(list, x)
+  for _, v in ipairs(list) do if v == x then return true end end
+  return false
+end
+
+-- When in the week does this item sell best? From the item's own weekday pattern
+-- (and the house's hour-of-week pattern for the time of day), or, for an item
+-- without one, the whole house's hour-of-week pattern. nil without either.
+-- { source = "item" | "house", now, best (price factors vs the week's average),
+--   upside (best / now - 1), goodNow, at (unix time of the next good time),
+--   when ("Fri 18:00" on the player's clock, or "Fri/Sat") }
+function A.Timing(h, t)
+  local P = ns.Prices
+  t = t or time()
+  local how, wd = P.HourOfWeek(t)
+  local wh = P.WeekHours()
+  if not (wh and wh.reliable) then wh = nil end
+  local wk = P.WeekdayAdvice(h)
+  if wk then
+    local out = { source = "item", now = 1 + (h.weekday[wd] or 0), best = 1 + wk.bestPct, goodNow = Contains(wk.best, wd) }
+    -- The next best day (today counts), and its best hour if the house pattern knows one.
+    local ahead, day = 0, wd
+    for k = 0, 6 do
+      local d = (wd - 1 + k) % 7 + 1
+      if Contains(wk.best, d) then ahead, day = k, d break end
+    end
+    local dayStart = t - t % 86400 + ahead * 86400
+    out.at, out.when = dayStart, P.DayList(wk.best)
+    if wh then
+      local bestHour
+      for hh = 0, 23 do
+        local v = wh.pct[(day - 1) * 24 + hh]
+        if v and (not bestHour or v > wh.pct[(day - 1) * 24 + bestHour]) then bestHour = hh end
+      end
+      -- start of the best 3 hours (the profile is smoothed around each hour)
+      if bestHour then out.at = dayStart + math.max(0, bestHour - 1) * 3600; out.when = P.WhenText(out.at) end
+    end
+    out.upside = out.best / out.now - 1
+    return out
+  end
+  if wh and h then
+    local out = { source = "house", now = 1 + (wh.pct[how] or 0), best = 1 + wh.pct[wh.best] }
+    out.upside = out.best / out.now - 1
+    out.goodNow = out.upside <= ns.Advisor.SETTINGS.peakNear
+    out.at = P.NextHourOfWeek((wh.best - 1) % 168, t)
+    out.when = P.WhenText(out.at)
+    return out
+  end
+  return nil
+end
+
 -- Returns { action, reason, unit (copper you'd get per item), ah, normal, vs }
 function A.Decide(id)
   local S = A.SETTINGS
@@ -121,19 +176,25 @@ function A.Decide(id)
   local h = ns.Prices.History(id)
   local trend = h and h.trend
   d.trend = trend
-  local vs = (normal and normal > 0) and (ah / normal - 1) or 0
-  d.vs = vs
-  local falling = trend and trend <= S.fallingTrend
-  local rising = trend and trend >= S.risingTrend
-  -- Order matters: a spike is always sold; a falling item is sold before it drops
-  -- further; a rising item is held (the "normal" price lags a rising market, so
-  -- "+12% vs normal" there is just the climb, not a peak).
   -- Thin market: with only a handful listed, the "price" is whatever one seller
   -- typed in. Don't call a spike or a dip on that; tell the player to look.
   local listed = p.auctions
   local thin = (p.source == "blizzard" or p.source == "scan") and listed ~= nil and listed < S.minListed
   d.thin = thin
-  local gain = normal and (ah - normal) or 0
+  -- A reliable weekly pattern: what's normal depends on the day (and hour). A usual
+  -- Saturday high is not a spike, and a usual Tuesday low is not a dip.
+  local timing = not thin and A.Timing(h) or nil
+  d.timing = timing
+  local expected = normal and normal * (timing and timing.now or 1)
+  local vs = (expected and expected > 0) and (ah / expected - 1) or 0
+  d.vs = vs
+  local falling = trend and trend <= S.fallingTrend
+  local rising = trend and trend >= S.risingTrend
+  -- Order matters: a spike is always sold; a falling item is sold before it drops
+  -- further; a rising item is held (the "normal" price lags a rising market, so
+  -- "+12% vs normal" there is just the climb, not a peak). The trend comes from
+  -- 7-day averages, so a weekly up-and-down never reads as rising or falling.
+  local gain = expected and (ah - expected) or 0
   local below = vs <= S.lowVsNormal
   local demand, sales = A.Demand(id)
   local drop = RecentDrop(h, ah)
@@ -166,15 +227,27 @@ function A.Decide(id)
   elseif below then
     d.action, d.reason = "HOLD", Pct(vs) .. " vs normal, wait"
   else
-    d.action, d.reason = "LIST", "Normal price"
+    d.action, d.reason = "LIST", timing and "Normal price for now" or "Normal price"
   end
 
-  -- A reliable weekly pattern: tell when to sell.
-  local wk = ns.Prices.WeekdayAdvice(h)
-  if wk and (d.action == "LIST" or d.action == "HOLD") then
-    d.bestDays = wk.best
-    d.reason = d.reason .. ", best on " .. ns.Prices.DayList(wk.best)
+  -- A reliable weekly pattern: list at the good time of the week. Only for items
+  -- that would be listed or held anyway: spikes, falling items and crashes keep
+  -- their advice.
+  if timing and (d.action == "LIST" or d.action == "HOLD") then
+    local whose = timing.source == "house" and " (whole AH)" or ""
+    if not timing.goodNow and timing.upside >= S.waitGain and ah * timing.upside >= S.minWaitGain then
+      d.action = "HOLD"
+      d.reason = d.reason .. "; list " .. timing.when .. ", usually " .. Pct(timing.upside) .. " then" .. whose
+      d.waitUntil = timing.at
+    elseif timing.goodNow and d.action == "LIST" and timing.best > 1 then
+      d.action = "SELL"
+      d.reason = "Best time of the week, usually " .. Pct(timing.best - 1) .. " vs the week" .. whose
+    elseif timing.goodNow then
+      d.reason = d.reason .. ", though now is usually the best time of the week" .. whose
+    end
   end
+  local wk = ns.Prices.WeekdayAdvice(h)
+  if wk then d.bestDays = wk.best end
   if (p.soldPerDay and p.soldPerDay < 10) or (not p.soldPerDay and p.saleRate and p.saleRate < 0.2) then
     d.reason = d.reason .. ", slow seller"
   end

@@ -35,9 +35,10 @@ local function AddLines(tooltip, id, needsShow)
       local up = h.trend >= 0
       Row(tooltip, "Trend", (up and "|cff5cdc75" or "|cffff6b6b") .. string.format("%+.1f%%", h.trend * 100) .. "|r" .. Grey(" per day"))
     end
-    local wk = ns.Prices.WeekdayAdvice(h)
-    if wk then
-      Row(tooltip, "Best day to sell", ns.Prices.DayList(wk.best) .. Grey(string.format("  (%+d%%)", math.floor(wk.bestPct * 100 + 0.5))))
+    local tm = d.timing
+    if tm then
+      Row(tooltip, tm.source == "house" and "Best time to list (whole AH)" or "Best time to list",
+        (tm.goodNow and "now" or tm.when) .. Grey(string.format("  (%+d%% vs the week)", math.floor((tm.best - 1) * 100 + 0.5))))
     end
     if p.soldPerDay then Row(tooltip, "Sells per day (EU)", tostring(p.soldPerDay)) end
     local sales = ns.Prices.Sales(id)
