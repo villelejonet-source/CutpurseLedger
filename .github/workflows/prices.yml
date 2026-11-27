@@ -44,7 +44,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          last=$(gh release list -R "${{ github.repository }}" --limit 1 --json createdAt --jq '.[0].createdAt' || true)
+          # Newest by publish time (createdAt is the tagged commit's date, see Prune below)
+          last=$(gh release list -R "${{ github.repository }}" --limit 100 --json publishedAt --jq 'map(.publishedAt) | max // empty' || true)
           if [ -n "$last" ] && [ $(( $(date -u +%s) - $(date -u -d "$last" +%s) )) -lt 2700 ]; then
             echo "Last release $last is under 45 minutes old: nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -152,8 +153,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release list --limit 300 --json tagName,createdAt \
-            --jq "sort_by(.createdAt) | reverse | .[${KEEP_RELEASES}:] | .[].tagName" |
+          # publishedAt, not createdAt: createdAt is the date of the tagged commit, the
+          # same for every release of one version, so sorting by it can delete the newest.
+          gh release list --limit 300 --json tagName,publishedAt \
+            --jq "sort_by(.publishedAt) | reverse | .[${KEEP_RELEASES}:] | .[].tagName" |
           while read -r tag; do gh release delete "$tag" --yes --cleanup-tag; done
 
       # GitHub switches off schedules in public repos after 60 days without repository
