@@ -5,7 +5,8 @@ A gold ledger, pickpocket and gathering tracker, and auction house advisor for *
 - **Gold log:** every copper in and out, labelled (mob loot, pickpocket, vendor, quests, repairs, AH sales and fees, mail, flights…). View it by session, today, 7 days, 30 days or all time.
 - **Gathering:** pickpocket, skinning, mining, herbalism and fishing: how many, what dropped, what it's worth at AH prices, gold per hour.
 - **Inventory advice:** everything you own on all characters (bags, bank, mail), each marked **Sell now / List / Hold / Vendor**.
-- **Market view:** Alt+click any item for its price chart (30 days / 12 weeks / 12 months), trend, and weekly pattern, e.g. *cheapest Tuesday, most expensive Saturday: buy Tuesday, sell Saturday*. Built for a young economy: "normal" means the last few days, and patterns are measured against the trend and only shown when they're real.
+- **Market view:** Alt+click any item for its price chart (30 days / 12 weeks / 12 months), trend, and weekly pattern, e.g. *cheapest Tuesday, most expensive Saturday: buy Tuesday, sell Saturday*. Built for a young economy: "normal" means the last few days, and patterns are measured against the trend and only shown when they're real. The advice uses them: hold a normal Tuesday price for Saturday, sell on the good day.
+- **Time of week:** the whole auction house's prices by hour of the week (*items list highest Friday 18:00-21:00*), so items without their own pattern still get a *list Fri 18:00* when it pays.
 - **Trending:** what's selling fast, getting pricier, drying up or cooling off on your auction house right now, measured from what was actually bought hour by hour. Guardrails keep out grey junk, one-buyer sweeps, sellers reposting and tiny markets.
 - **Quest items:** with Questie installed, items that quests ask for are tagged (*"Quest item: Cloth Donation (58)"*) and Trending has a *Quest items* filter.
 - **Vendor guard:** sold something to a vendor that's worth more on the AH? A popup offers to buy it back.
@@ -58,7 +59,7 @@ WoW addons can't go online, so prices are shipped as an addon:
 1. Every hour a GitHub Action reads every WoW: Forever auction house of the region from Blizzard's API (`dynamic-forever-eu`, `/data/wow/ruleset/{id}/auctions/{house}` and `/commodities`).
 2. Per item and house it computes the market price (cheapest 15% of units), lowest price, quantity listed, and history: daily for 120 days, monthly beyond that.
 3. It compares each hourly snapshot with the previous one to see what was bought (listings gone before they ran out, stacks that shrank; expired and cancel-and-relist are left out).
-4. It analyses the history (recent baseline, trend per day, weekday pattern with a significance test, trending lists with guardrails) and publishes a release with fresh `LootLedger_Prices`.
+4. It analyses the history (recent baseline, trend per day from 7-day averages, weekday pattern with a significance test, an hour-of-week market index per house, trending lists with guardrails) and publishes a release with fresh `LootLedger_Prices`.
 
 The feed is in [`poller/`](poller); `node --test poller/*.test.mjs` runs its tests.
 

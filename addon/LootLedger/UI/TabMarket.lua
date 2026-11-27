@@ -61,7 +61,7 @@ local function LastChange(values)
   return last and prev and (last / prev - 1) or nil
 end
 
-local SupplyRows  -- defined below Render
+local SupplyRows, TimeOfWeekRows  -- defined below Render
 
 local function Empty()
   local rows = {
@@ -206,7 +206,40 @@ local function Render(view)
     rows[#rows + 1] = { kind = "note", text = "No reliable weekly pattern: the weekday differences are within normal day-to-day noise, or they change from week to week. Sell whenever the advice above says so." }
   end
 
+  TimeOfWeekRows(rows)
   return SupplyRows(rows, id, p, h)
+end
+
+-- The whole auction house by hour of the week: when do items list highest and lowest?
+function TimeOfWeekRows(rows)
+  local wh = P.WeekHours()
+  if not wh then return end
+  rows[#rows + 1] = { kind = "section", text = "Time of week (whole auction house)",
+    right = T.Color(wh.weeks .. (wh.weeks == 1 and " week" or " weeks") .. " of data", C.muted) }
+  if wh.reliable then
+    local function Window(b)
+      local at = P.NextHourOfWeek((b - 1) % 168)
+      return P.WhenText(at) .. "-" .. date("%H:00", at + 3 * 3600)
+    end
+    -- One bar per day: that day's average across its hours.
+    local bars = {}
+    for d = 1, 7 do
+      local sum, n = 0, 0
+      for hh = 0, 23 do local v = wh.pct[(d - 1) * 24 + hh]; if v then sum, n = sum + v, n + 1 end end
+      local v = n > 0 and sum / n or nil
+      bars[d] = { label = P.DAY_SHORT[d], value = v, text = v and Pct(v, true) or nil, color = { 0.55, 0.55, 0.6, 1 } }
+    end
+    rows[#rows + 1] = { kind = "bars", bars = bars, height = 90 }
+    rows[#rows + 1] = { kind = "row", badge = { text = "Sell", color = C.green }, label = "Highest: " .. Window(wh.best),
+      note = "items list " .. Pct(wh.pct[wh.best]) .. " vs the week", value = "" }
+    rows[#rows + 1] = { kind = "row", badge = { text = "Buy", color = C.blue }, label = "Lowest: " .. Window(wh.worst),
+      note = "items list " .. Pct(wh.pct[wh.worst]) .. " vs the week", value = "" }
+    rows[#rows + 1] = { kind = "note", text = "Your clock. Items with their own weekly pattern follow theirs; the rest use this when the advice says when to list." }
+  else
+    local since = wh.since and (" since " .. ns.ShortDate(wh.since)) or ""
+    rows[#rows + 1] = { kind = "note", text = ("Collecting%s: the house's prices are recorded every hour. Needs 2 full weeks to tell whether some hours of the week (say Friday evening) are dearer than others, and how much.")
+      :format(since) }
+  end
 end
 
 -- Supply, purchases, trending and quests: shown even for items without price history.

@@ -81,9 +81,30 @@ test("one week of data is never reliable", () => {
 });
 
 test("trend reads a falling market", () => {
-  const values = Array.from({ length: 10 }, (_, i) => 40000 * Math.pow(0.97, i));
+  const values = Array.from({ length: 16 }, (_, i) => 40000 * Math.pow(0.97, i));
   assert.ok(Math.abs(trend(values) - -0.03) < 0.002);
-  assert.equal(trend([40000, 39000]), null, "needs 3 days");
+  assert.equal(trend(values.slice(0, 8)), null, "needs 9 days (three 7-day averages)");
+  assert.ok(Math.abs(trend(values.slice(0, 9)) - -0.03) < 0.002);
+});
+
+test("a weekly up-and-down is not a trend on any day of the week", () => {
+  // Saturday +15%, Tuesday -12% around a flat market: the old daily fit said
+  // "falling" around Tuesday and "rising" before Saturday.
+  const swing = [-0.09, -0.12, -0.06, 0, 0.08, 0.15, 0.04];
+  const s = series(35, (i, wd) => 40000 * (1 + swing[wd]));
+  for (let end = 21; end <= 35; end++) {
+    const t = trend(s.slice(0, end).map((d) => d.market));
+    assert.ok(Math.abs(t) < 0.005, `day ${end}: trend ${t}`);
+  }
+});
+
+test("a weekly swing on top of a real fall still reads as the fall", () => {
+  const swing = [-0.09, -0.12, -0.06, 0, 0.08, 0.15, 0.04];
+  const s = series(28, (i, wd) => 40000 * Math.pow(0.98, i) * (1 + swing[wd]));
+  for (let end = 16; end <= 28; end++) {
+    const t = trend(s.slice(0, end).map((d) => d.market));
+    assert.ok(Math.abs(t - -0.02) < 0.004, `day ${end}: trend ${t}`);
+  }
 });
 
 test("baseline leans on recent days", () => {

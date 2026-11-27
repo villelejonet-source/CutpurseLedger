@@ -45,9 +45,29 @@ export function baseline(values, halfLife = SETTINGS.baselineHalfLife) {
   return wsum ? sum / wsum : null;
 }
 
+// 7-day averages (geometric mean of each 7 days in a row, newest last; null where
+// fewer than 5 of the 7 days have a price). Each average holds every weekday once.
+export function weekAverages(values) {
+  const out = [];
+  for (let i = 6; i < values.length; i++) {
+    let s = 0, n = 0;
+    for (let j = i - 6; j <= i; j++) if (values[j] > 0) { s += Math.log(values[j]); n++; }
+    out.push(n >= 5 ? Math.exp(s / n) : null);
+  }
+  return out;
+}
+
 // Trend as fraction per day (e.g. -0.02 = falling 2% a day), from a weighted
-// log-linear fit over the last trendDays. Needs 3+ days with data.
+// log-linear fit over the last trendDays of 7-day averages. Fitting the daily
+// prices themselves would read a weekly up-and-down as "rising" before the weekend
+// peak and "falling" before the weekday low, the opposite of good advice.
+// Needs 3+ averages, so 9+ days of prices; null before that.
 export function trend(values, days = SETTINGS.trendDays, halfLife = SETTINGS.trendHalfLife) {
+  return fitTrend(weekAverages(values), days, halfLife);
+}
+
+// Weighted log-linear fit of a series (nulls skipped). Needs 3+ points.
+export function fitTrend(values, days = SETTINGS.trendDays, halfLife = SETTINGS.trendHalfLife) {
   const pts = [];
   const recent = values.slice(-days);
   recent.forEach((v, i) => {
