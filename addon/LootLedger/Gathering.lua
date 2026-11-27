@@ -82,6 +82,12 @@ end
 ---------------------------------------------------------------------------
 -- Data
 ---------------------------------------------------------------------------
+-- Is this ledger source one of the activities (pickpocket, skinning, ...)?
+function G.IsActivity(key)
+  for _, a in ipairs(G.ACTIVITIES) do if a.key == key then return true end end
+  return false
+end
+
 function G.Bucket(key)
   local b = ns.db.acts[key]
   if not b then
@@ -212,7 +218,10 @@ local function AddItem(link, qty)
   local key = current.key
   local b = G.Bucket(key)
   local worth = ns.SellPrice(link) * qty
-  local net = G.NetNow(id)  -- lock today's AH price (after the cut) to this loot
+  -- Lock today's AH price (after the cut) to this loot, but only from the player's
+  -- own house: a guessed house's price would stay in the totals for good.
+  local status = ns.Prices and ns.Prices.Status()
+  local net = not (status and status.source == "blizzard" and not status.confirmed) and G.NetNow(id) or nil
   b.items[id] = (b.items[id] or 0) + qty
   b.names[id] = link:match("%[(.-)%]") or b.names[id]
   b.value = b.value + worth

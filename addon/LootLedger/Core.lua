@@ -132,8 +132,17 @@ function ns.FormatDuration(seconds)
   return string.format("%dh %02dm", math.floor(seconds / 3600), math.floor((seconds % 3600) / 60))
 end
 
+-- Calendar arithmetic (noon, day - n), not time() - n*86400: around the clock
+-- changes a day isn't 86400 seconds, and the subtraction lands on the wrong day.
+local function DaysAgo(n)
+  local t = date("*t", time())
+  t.day, t.hour, t.min, t.sec, t.isdst = t.day - (n or 0), 12, 0, 0, nil
+  return t
+end
+
 function ns.DayKey(offsetDays)
-  return date("%Y-%m-%d", time() - (offsetDays or 0) * 86400)
+  if not offsetDays or offsetDays == 0 then return date("%Y-%m-%d", time()) end
+  return date("%Y-%m-%d", time(DaysAgo(offsetDays)))
 end
 
 -- Turn a GlobalStrings format like "You receive loot: %sx%d." into a Lua pattern.
@@ -176,8 +185,8 @@ end
 
 -- Midnight, n days ago (0 = today).
 function ns.DayStart(daysAgo)
-  local t = date("*t", time() - (daysAgo or 0) * 86400)
-  t.hour, t.min, t.sec = 0, 0, 0
+  local t = date("*t", time(DaysAgo(daysAgo)))
+  t.hour, t.min, t.sec, t.isdst = 0, 0, 0, nil
   return time(t)
 end
 

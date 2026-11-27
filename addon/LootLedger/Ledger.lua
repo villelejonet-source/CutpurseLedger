@@ -229,6 +229,10 @@ end
 Hook("PickupInventoryItem", function() if InRepairMode and InRepairMode() then Flag("repair") end end)
 Hook("RepairAllItems", function() Flag("repair") end)
 Hook("BuyMerchantItem", function(index, qty)
+  -- Items paid with honor or tokens cost no gold: queuing them would shift the
+  -- names on the next gold purchases.
+  local price = GetMerchantItemInfo and select(3, GetMerchantItemInfo(index))
+  if price == 0 then return end
   buyQueue[#buyQueue + 1] = { link = GetMerchantItemLink(index), qty = qty or 1 }
 end)
 Hook("BuybackItem", function(index)
@@ -416,15 +420,24 @@ ns.OnInit(L.SyncMoney)
 
 ns.On("QUEST_TURNED_IN", function() Flag("quest") end)  -- the only quest flag (not GetQuestReward too)
 
+-- Ledger entries a loot chat line has already been matched to (not saved).
+local chatSeen = setmetatable({}, { __mode = "k" })
+
 -- "You loot 5 Silver, 20 Copper": money from a corpse, whether or not we saw
 -- its loot window. The chat line can arrive before or after the money change.
 ns.On("CHAT_MSG_MONEY", function()
   if not ns.db then return end
   local last = ns.db.ledger.recent[1]
-  local recent = last and time() - last.t <= 3
-  if recent and last.s == "other" and last.a > 0 then
+  local recent = last and time() - last.t <= 3 and last.a > 0 and not chatSeen[last]
+  if recent and last.s == "other" then
     Relabel(last, "loot")      -- money came first and was unlabelled
+    chatSeen[last] = true
     ns.Refresh()
+  elseif recent and (last.s == "loot" or (ns.Gathering.IsActivity and ns.Gathering.IsActivity(last.s))) then
+    -- Money came first and is already filed (as loot, or under pickpocketing or a
+    -- gathering activity). Nothing to wait for: a "loot" flag here would label the
+    -- next unrelated income (a quest reward, mail) as loot.
+    chatSeen[last] = true
   else
     Flag("loot")               -- money hasn't arrived yet
   end

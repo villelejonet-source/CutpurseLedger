@@ -48,7 +48,9 @@ function Q.Build()
       local itemObjectives = okO and type(objectives) == "table" and objectives[3]
       local hasItems = (type(itemObjectives) == "table" and #itemObjectives > 0) or (okR and type(required) == "table" and #required > 0)
       if hasItems then
-        local quest = { id = id, name = db.Get(id, "name") or ("quest " .. id), level = db.Get(id, "questLevel") or db.Get(id, "requiredLevel") or 0 }
+        -- Every Questie lookup is protected: one broken quest mustn't stop the whole index.
+        local function Get(key) local ok, v = pcall(db.Get, id, key); return ok and v or nil end
+        local quest = { id = id, name = Get("name") or ("quest " .. id), level = Get("questLevel") or Get("requiredLevel") or 0 }
         if type(itemObjectives) == "table" then
           for _, o in ipairs(itemObjectives) do Add(map, type(o) == "table" and o[1] or o, quest) end
         end

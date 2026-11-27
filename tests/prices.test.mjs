@@ -75,3 +75,38 @@ test("C4: closing the AH before the first probe stops detection", () => {
        FIRE("AUCTION_HOUSE_CLOSED"); ADVANCE(30)`);
   assert.equal(get("QUERIES"), 0);
 });
+
+// The character's detected house (113) is missing from this hour's feed; only house 114 is there.
+const MISSING = `LOOT_ITEM_SELF_MULTIPLE = "You receive loot: %sx%d."; LootLedgerPrices = { updated = NOW, houses = {
+  [114] = { name = "Horde Other", faction = "Horde", updated = NOW, listings = 9000, days = 5, items = { [2318] = "99999,90000,500,0,0" } },
+} }`;
+function missingHouse() {
+  const vm = luaVM({ files: FILES, login: false, before: MISSING });
+  vm.run(`ITEMS[2318] = { name = "Light Leather", sell = 15 }; LootLedgerAccountDB = { chars = { ["-Vanish"] = { house = 113, houseSource = "detected", lootPricesFrom = 1 } } }; FIRE("PLAYER_LOGIN")`);
+  return vm;
+}
+
+test("C5: a house missing from this hour's feed is kept, with no prices, not swapped for another house", () => {
+  const vm = missingHouse();
+  vm.run(`h, conf, how = ns.Prices.House()`);
+  assert.equal(vm.get("h"), 113);
+  assert.equal(vm.get("how"), "detected");
+  assert.equal(vm.get("ns.Prices.Get(2318).hasAH"), false);
+});
+
+test("C5: loot gathered meanwhile isn't locked to another house's price", () => {
+  const vm = missingHouse();
+  vm.run(`FIRE("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 8613); FIRE("LOOT_READY"); FIRE("CHAT_MSG_LOOT", "You receive loot: " .. LINK(2318) .. "x2.")`);
+  assert.equal(vm.get("ns.db.acts.skinning.items[2318]"), 2);
+  assert.equal(vm.get("ns.db.acts.skinning.lootV[2318]"), null);
+});
+
+test("C5: loot is not locked to a guessed house's price either", () => {
+  const vm = luaVM({ files: FILES, login: false, before: MISSING });
+  vm.run(`ITEMS[2318] = { name = "Light Leather", sell = 15 }; LootLedgerAccountDB = { chars = { ["-Vanish"] = {} } }; FIRE("PLAYER_LOGIN")`);
+  vm.run(`h, conf, how = ns.Prices.House()`);
+  assert.equal(vm.get("how"), "guess");
+  vm.run(`FIRE("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 8613); FIRE("LOOT_READY"); FIRE("CHAT_MSG_LOOT", "You receive loot: " .. LINK(2318) .. "x2.")`);
+  assert.equal(vm.get("ns.db.acts.skinning.items[2318]"), 2);
+  assert.equal(vm.get("ns.db.acts.skinning.lootV[2318]"), null);
+});
